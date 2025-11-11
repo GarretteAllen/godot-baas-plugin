@@ -1,0 +1,98 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8qy9z8n6rxtn"]
+
+[ext_resource type="Script" path="res://addons/godot_baas/examples/full_test.gd" id="1_full_test"]
+
+[node name="FullTest" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_full_test")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "🎮 Godot BaaS - Full Test Suite"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="TestButtons" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TestAnonymousLogin" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "1️⃣ Test Anonymous Login"
+
+[node name="TestSaveData" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "2️⃣ Test Save Data"
+
+[node name="TestLoadData" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "3️⃣ Test Load Data"
+
+[node name="TestUpdateData" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "4️⃣ Test Update Data (with version)"
+
+[node name="TestDeleteData" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "5️⃣ Test Delete Data"
+
+[node name="TestSubmitScore" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "6️⃣ Test Submit Score"
+
+[node name="TestGetLeaderboard" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "7️⃣ Test Get Leaderboard"
+
+[node name="TestTrackEvent" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "8️⃣ Test Track Analytics Event"
+
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+
+[node name="TestRunAll" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 1, 0.2, 1)
+theme_override_font_sizes/font_size = 18
+text = "▶️ RUN ALL TESTS"
+
+[node name="HSeparator3" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="LogLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "📋 Test Output:"
+theme_override_font_sizes/font_size = 16
+
+[node name="LogOutput" type="RichTextLabel" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 300)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/default_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.5)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+bbcode_enabled = true
+scroll_following = true
