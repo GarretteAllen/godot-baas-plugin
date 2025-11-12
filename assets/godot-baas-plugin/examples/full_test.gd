@@ -39,8 +39,10 @@ func _ready() -> void:
 # Test button handler
 func _on_test_button_pressed(test_name: String) -> void:
 	match test_name:
-		"TestAnonymousLogin":
-			test_anonymous_login()
+		"TestDeviceLogin":
+			test_device_login()
+		"TestLinkAccount":
+			test_link_account()
 		"TestSaveData":
 			test_save_data()
 		"TestLoadData":
@@ -58,11 +60,27 @@ func _on_test_button_pressed(test_name: String) -> void:
 		"TestRunAll":
 			run_all_tests()
 
-# Test 1: Anonymous Login
-func test_anonymous_login() -> void:
-	log_message("\n[TEST] Anonymous Login")
-	log_message("→ Logging in anonymously...")
-	GodotBaaS.login_anonymous()
+# Test 1: Device ID Login
+func test_device_login() -> void:
+	log_message("\n[TEST] Device ID Login")
+	log_message("→ Logging in with device ID...")
+	log_message("  (Device ID is automatically generated and stored)")
+	GodotBaaS.login_with_device_id()
+
+# Test 2: Link Account (Upgrade to Email/Password)
+func test_link_account() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Link Account")
+	log_message("→ Upgrading device account to email/password...")
+	var random_email = "test_" + str(randi()) + "@example.com"
+	var password = "SecurePassword123!"
+	var username = "TestPlayer" + str(randi_range(1000, 9999))
+	
+	log_message("  Email: " + random_email)
+	log_message("  Username: " + username)
+	GodotBaaS.link_account(random_email, password, username)
 
 # Test 2: Save Data
 func test_save_data() -> void:
@@ -162,21 +180,21 @@ func run_all_tests() -> void:
 	test_results.clear()
 	current_version = 0
 	
-	# Test 1: Login
-	test_anonymous_login()
+	# Test 1: Device ID Login
+	test_device_login()
 	await get_tree().create_timer(2.0).timeout
 	
-	# Test 2: Save
+	# Test 2: Save Data
 	if test_results.get("login", false):
 		test_save_data()
 		await get_tree().create_timer(2.0).timeout
 	
-	# Test 3: Load
+	# Test 3: Load Data
 	if test_results.get("save_data", false):
 		test_load_data()
 		await get_tree().create_timer(2.0).timeout
 	
-	# Test 4: Update
+	# Test 4: Update Data
 	if test_results.get("load_data", false):
 		test_update_data()
 		await get_tree().create_timer(2.0).timeout
@@ -195,7 +213,12 @@ func run_all_tests() -> void:
 	test_track_event()
 	await get_tree().create_timer(1.0).timeout
 	
-	# Test 8: Delete Data
+	# Test 8: Link Account (Optional - upgrades to email/password)
+	if test_results.get("login", false):
+		log_message("\n→ Skipping account linking test (optional)")
+		log_message("  Run 'TestLinkAccount' manually to test account upgrade")
+	
+	# Test 9: Delete Data
 	if test_results.get("save_data", false):
 		test_delete_data()
 	
@@ -209,7 +232,14 @@ func _on_authenticated(player_data: Dictionary) -> void:
 	test_player_id = player_data.get("id", "")
 	log_message("✓ AUTHENTICATED")
 	log_message("  Player ID: " + test_player_id)
+	log_message("  Device ID: " + str(player_data.get("deviceId", "N/A")).substr(0, 13) + "...")
 	log_message("  Is Anonymous: " + str(player_data.get("isAnonymous", false)))
+	
+	if player_data.get("email"):
+		log_message("  Email: " + str(player_data.get("email")))
+		log_message("  Username: " + str(player_data.get("username")))
+		test_results["link_account"] = true
+	
 	test_results["login"] = true
 
 func _on_auth_failed(error: String) -> void:

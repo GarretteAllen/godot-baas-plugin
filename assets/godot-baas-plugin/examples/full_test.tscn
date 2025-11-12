@@ -37,37 +37,41 @@ layout_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="TestAnonymousLogin" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestDeviceLogin" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "1️⃣ Test Anonymous Login"
+text = "1️⃣ Test Device ID Login (Persistent)"
+
+[node name="TestLinkAccount" type="Button" parent="VBoxContainer/TestButtons"]
+layout_mode = 2
+text = "2️⃣ Test Link Account (Upgrade to Email/Password)"
 
 [node name="TestSaveData" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "2️⃣ Test Save Data"
+text = "3️⃣ Test Save Data"
 
 [node name="TestLoadData" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "3️⃣ Test Load Data"
+text = "4️⃣ Test Load Data"
 
 [node name="TestUpdateData" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "4️⃣ Test Update Data (with version)"
+text = "5️⃣ Test Update Data (with version)"
 
 [node name="TestDeleteData" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "5️⃣ Test Delete Data"
+text = "6️⃣ Test Delete Data"
 
 [node name="TestSubmitScore" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "6️⃣ Test Submit Score"
+text = "7️⃣ Test Submit Score"
 
 [node name="TestGetLeaderboard" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "7️⃣ Test Get Leaderboard"
+text = "8️⃣ Test Get Leaderboard"
 
 [node name="TestTrackEvent" type="Button" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
-text = "8️⃣ Test Track Analytics Event"
+text = "9️⃣ Test Track Analytics Event"
 
 [node name="HSeparator2" type="HSeparator" parent="VBoxContainer/TestButtons"]
 layout_mode = 2
