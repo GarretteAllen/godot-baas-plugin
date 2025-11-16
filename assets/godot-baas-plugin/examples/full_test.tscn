@@ -11,87 +11,180 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_full_test")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="LeftPanel" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(350, 0)
+layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="VBoxContainer"]
+[node name="Title" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 28
-text = "🎮 Godot BaaS - Full Test Suite"
+theme_override_font_sizes/font_size = 20
+text = "🎮 Godot BaaS Test Suite"
 horizontal_alignment = 1
 
-[node name="HSeparator" type="HSeparator" parent="VBoxContainer"]
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/HBoxContainer/LeftPanel"]
 layout_mode = 2
 
-[node name="TestButtons" type="VBoxContainer" parent="VBoxContainer"]
+[node name="ButtonsLabel" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel"]
 layout_mode = 2
-theme_override_constants/separation = 5
+text = "Test Controls:"
+theme_override_font_sizes/font_size = 14
 
-[node name="TestDeviceLogin" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/HBoxContainer/LeftPanel"]
 layout_mode = 2
-text = "1️⃣ Test Device ID Login (Persistent)"
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="TestLinkAccount" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestButtons" type="VBoxContainer" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer"]
 layout_mode = 2
-text = "2️⃣ Test Link Account (Upgrade to Email/Password)"
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
 
-[node name="TestSaveData" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="AuthSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "3️⃣ Test Save Data"
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ AUTHENTICATION ━━━"
 
-[node name="TestLoadData" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestDeviceLogin" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "4️⃣ Test Load Data"
+text = "1. Device ID Login"
 
-[node name="TestUpdateData" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestLinkAccount" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "5️⃣ Test Update Data (with version)"
+text = "2. Link Account (Email)"
 
-[node name="TestDeleteData" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="CloudSavesSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "6️⃣ Test Delete Data"
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ CLOUD SAVES ━━━"
 
-[node name="TestSubmitScore" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestSaveData" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "7️⃣ Test Submit Score"
+text = "3. Save Data"
 
-[node name="TestGetLeaderboard" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestLoadData" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "8️⃣ Test Get Leaderboard"
+text = "4. Load Data"
 
-[node name="TestTrackEvent" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestUpdateData" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
-text = "9️⃣ Test Track Analytics Event"
+text = "5. Update Data"
 
-[node name="HSeparator2" type="HSeparator" parent="VBoxContainer/TestButtons"]
+[node name="TestDeleteData" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "6. Delete Data"
+
+[node name="LeaderboardsSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ LEADERBOARDS ━━━"
+
+[node name="TestSubmitScore" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "7. Submit Score"
+
+[node name="TestGetLeaderboard" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "8. Get Leaderboard"
+
+[node name="AchievementsSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ ACHIEVEMENTS ━━━"
+
+[node name="TestGrantAchievement" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "9. Grant Achievement"
+
+[node name="TestUpdateProgress" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "10. Update Progress"
+
+[node name="TestGetAchievements" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "11. Get Achievements"
+
+[node name="FriendsSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ FRIENDS SYSTEM ━━━"
+
+[node name="TestSearchPlayers" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "12. Search Players"
+
+[node name="TestSendFriendRequest" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "13. Send Friend Request"
+
+[node name="TestGetFriends" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "14. Get Friends List"
+
+[node name="TestGetPendingRequests" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "15. Get Pending Requests"
+
+[node name="TestBlockPlayer" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "16. Block Player"
+
+[node name="TestGetFriendLeaderboard" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "17. Friend Leaderboard"
+
+[node name="AnalyticsSection" type="Label" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "━━━ ANALYTICS ━━━"
+
+[node name="TestTrackEvent" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+layout_mode = 2
+text = "18. Track Event"
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
 layout_mode = 2
 
-[node name="TestRunAll" type="Button" parent="VBoxContainer/TestButtons"]
+[node name="TestRunAll" type="Button" parent="MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons"]
+custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.2, 1, 0.2, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 text = "▶️ RUN ALL TESTS"
 
-[node name="HSeparator3" type="HSeparator" parent="VBoxContainer"]
+[node name="RightPanel" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
 layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
 
-[node name="LogLabel" type="Label" parent="VBoxContainer"]
+[node name="LogLabel" type="Label" parent="MarginContainer/HBoxContainer/RightPanel"]
 layout_mode = 2
 text = "📋 Test Output:"
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 
-[node name="LogOutput" type="RichTextLabel" parent="VBoxContainer"]
-custom_minimum_size = Vector2(0, 300)
+[node name="LogOutput" type="RichTextLabel" parent="MarginContainer/HBoxContainer/RightPanel"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_colors/default_color = Color(0.9, 0.9, 0.9, 1)

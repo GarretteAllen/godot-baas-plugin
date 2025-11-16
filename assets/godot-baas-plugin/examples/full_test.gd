@@ -1,8 +1,8 @@
 extends Control
 
 # UI References
-@onready var log_output: RichTextLabel = $VBoxContainer/LogOutput
-@onready var test_buttons: VBoxContainer = $VBoxContainer/TestButtons
+@onready var log_output: RichTextLabel = $MarginContainer/HBoxContainer/RightPanel/LogOutput
+@onready var test_buttons: VBoxContainer = $MarginContainer/HBoxContainer/LeftPanel/ScrollContainer/TestButtons
 
 # Test state
 var test_results: Dictionary = {}
@@ -22,6 +22,17 @@ func _ready() -> void:
 	GodotBaaS.data_conflict.connect(_on_data_conflict)
 	GodotBaaS.score_submitted.connect(_on_score_submitted)
 	GodotBaaS.leaderboard_loaded.connect(_on_leaderboard_loaded)
+	GodotBaaS.achievement_unlocked.connect(_on_achievement_unlocked)
+	GodotBaaS.achievement_progress_updated.connect(_on_achievement_progress_updated)
+	GodotBaaS.achievement_unlock_failed.connect(_on_achievement_unlock_failed)
+	GodotBaaS.achievements_loaded.connect(_on_achievements_loaded)
+	GodotBaaS.friend_request_sent.connect(_on_friend_request_sent)
+	GodotBaaS.friend_request_accepted.connect(_on_friend_request_accepted)
+	GodotBaaS.friends_loaded.connect(_on_friends_loaded)
+	GodotBaaS.pending_requests_loaded.connect(_on_pending_requests_loaded)
+	GodotBaaS.players_found.connect(_on_players_found)
+	GodotBaaS.player_blocked.connect(_on_player_blocked)
+	GodotBaaS.friend_leaderboard_loaded.connect(_on_friend_leaderboard_loaded)
 	GodotBaaS.error.connect(_on_error)
 	
 	# Connect test buttons
@@ -57,6 +68,24 @@ func _on_test_button_pressed(test_name: String) -> void:
 			test_get_leaderboard()
 		"TestTrackEvent":
 			test_track_event()
+		"TestGrantAchievement":
+			test_grant_achievement()
+		"TestUpdateProgress":
+			test_update_progress()
+		"TestGetAchievements":
+			test_get_achievements()
+		"TestSearchPlayers":
+			test_search_players()
+		"TestSendFriendRequest":
+			test_send_friend_request()
+		"TestGetFriends":
+			test_get_friends()
+		"TestGetPendingRequests":
+			test_get_pending_requests()
+		"TestBlockPlayer":
+			test_block_player()
+		"TestGetFriendLeaderboard":
+			test_get_friend_leaderboard()
 		"TestRunAll":
 			run_all_tests()
 
@@ -172,6 +201,102 @@ func test_track_event() -> void:
 	log_message("✓ Event tracked (fire-and-forget)")
 	test_results["track_event"] = true
 
+# Test 9: Grant Achievement
+func test_grant_achievement() -> void:
+	log_message("\n[TEST] Grant Achievement")
+	log_message("→ Granting achievement 'first_test'...")
+	log_message("  (Make sure this achievement exists in your dashboard)")
+	GodotBaaS.grant_achievement("first_test")
+
+# Test 10: Update Achievement Progress
+func test_update_progress() -> void:
+	log_message("\n[TEST] Update Achievement Progress")
+	log_message("→ Updating progress for 'test_progress' achievement...")
+	log_message("  Setting progress to 50...")
+	GodotBaaS.update_achievement_progress("test_progress", 50)
+	
+	await get_tree().create_timer(2.0).timeout
+	
+	log_message("→ Incrementing progress by 25...")
+	GodotBaaS.update_achievement_progress("test_progress", 25, true)
+
+# Test 11: Get All Achievements
+func test_get_achievements() -> void:
+	log_message("\n[TEST] Get All Achievements")
+	log_message("→ Fetching all achievements...")
+	GodotBaaS.get_achievements(false)  # Don't include hidden
+	
+	await get_tree().create_timer(2.0).timeout
+	
+	log_message("→ Fetching all achievements (including hidden)...")
+	GodotBaaS.get_achievements(true)
+
+# Test 12: Search Players
+func test_search_players() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Search Players")
+	log_message("→ Searching for players...")
+	log_message("  ⚠ EDIT THIS: Change 'test' to search for a real player")
+	GodotBaaS.search_players("test")
+
+# Test 13: Send Friend Request
+func test_send_friend_request() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Send Friend Request")
+	log_message("  ⚠ EDIT THIS: Replace with actual player ID or username")
+	log_message("  Example: GodotBaaS.send_friend_request(\"player_id_here\")")
+	log_message("  You can get player IDs from the search results above")
+	log_message("")
+	log_message("✗ SKIPPED - Please edit the code to add a friend ID")
+	
+	# UNCOMMENT AND EDIT THIS LINE:
+	# GodotBaaS.send_friend_request("PUT_FRIEND_PLAYER_ID_HERE")
+
+# Test 14: Get Friends List
+func test_get_friends() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Get Friends List")
+	log_message("→ Fetching friends list...")
+	GodotBaaS.get_friends()
+
+# Test 15: Get Pending Friend Requests
+func test_get_pending_requests() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Get Pending Friend Requests")
+	log_message("→ Fetching pending friend requests...")
+	GodotBaaS.get_pending_requests()
+
+# Test 16: Block Player
+func test_block_player() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Block Player")
+	log_message("  ⚠ EDIT THIS: Replace with actual player ID to block")
+	log_message("  Example: GodotBaaS.block_player(\"player_id_here\", \"spam\")")
+	log_message("")
+	log_message("✗ SKIPPED - Please edit the code to add a player ID")
+	
+	# UNCOMMENT AND EDIT THIS LINE:
+	# GodotBaaS.block_player("PUT_PLAYER_ID_HERE", "Testing block feature")
+
+# Test 17: Get Friend Leaderboard
+func test_get_friend_leaderboard() -> void:
+	if not _check_authenticated():
+		return
+	
+	log_message("\n[TEST] Get Friend Leaderboard")
+	log_message("→ Fetching friend leaderboard for 'test-leaderboard'...")
+	GodotBaaS.get_friend_leaderboard("test-leaderboard", 50)
+
 # Run all tests in sequence
 func run_all_tests() -> void:
 	log_message("\n" + "=".repeat(50))
@@ -213,12 +338,31 @@ func run_all_tests() -> void:
 	test_track_event()
 	await get_tree().create_timer(1.0).timeout
 	
-	# Test 8: Link Account (Optional - upgrades to email/password)
+	# Test 8: Get Achievements
+	if test_results.get("login", false):
+		test_get_achievements()
+		await get_tree().create_timer(2.0).timeout
+	
+	# Test 9: Grant Achievement
+	if test_results.get("login", false):
+		log_message("\n→ Testing achievement grant...")
+		log_message("  (Create an achievement with ID 'first_test' in dashboard)")
+		test_grant_achievement()
+		await get_tree().create_timer(2.0).timeout
+	
+	# Test 10: Update Progress
+	if test_results.get("login", false):
+		log_message("\n→ Testing achievement progress...")
+		log_message("  (Create a progress achievement with ID 'test_progress' in dashboard)")
+		test_update_progress()
+		await get_tree().create_timer(3.0).timeout
+	
+	# Test 11: Link Account (Optional - upgrades to email/password)
 	if test_results.get("login", false):
 		log_message("\n→ Skipping account linking test (optional)")
 		log_message("  Run 'TestLinkAccount' manually to test account upgrade")
 	
-	# Test 9: Delete Data
+	# Test 12: Delete Data
 	if test_results.get("save_data", false):
 		test_delete_data()
 	
@@ -284,6 +428,140 @@ func _on_leaderboard_loaded(leaderboard: String, entries: Array) -> void:
 			log_message("    #" + str(entry.get("rank", i+1)) + " - Score: " + str(entry.get("score", 0)))
 	
 	test_results["get_leaderboard"] = true
+
+func _on_achievement_unlocked(achievement: Dictionary) -> void:
+	log_message("🏆 ACHIEVEMENT UNLOCKED!")
+	log_message("  Name: " + str(achievement.get("name", "Unknown")))
+	log_message("  Description: " + str(achievement.get("description", "")))
+	log_message("  Points: " + str(achievement.get("points", 0)))
+	log_message("  Rarity: " + str(achievement.get("rarity", "COMMON")))
+	test_results["grant_achievement"] = true
+
+func _on_achievement_progress_updated(achievement: Dictionary) -> void:
+	log_message("📊 ACHIEVEMENT PROGRESS UPDATED")
+	log_message("  Name: " + str(achievement.get("name", "Unknown")))
+	log_message("  Progress: " + str(achievement.get("progress", 0)) + "/" + str(achievement.get("targetValue", 100)))
+	
+	if achievement.get("isUnlocked", false):
+		log_message("  🎉 Achievement unlocked!")
+	
+	test_results["update_progress"] = true
+
+func _on_achievement_unlock_failed(error: String) -> void:
+	log_message("✗ ACHIEVEMENT UNLOCK FAILED: " + error, true)
+
+func _on_achievements_loaded(achievements: Array) -> void:
+	log_message("✓ ACHIEVEMENTS LOADED")
+	log_message("  Total: " + str(achievements.size()))
+	
+	var unlocked_count = 0
+	for achievement in achievements:
+		if achievement.get("isUnlocked", false):
+			unlocked_count += 1
+	
+	log_message("  Unlocked: " + str(unlocked_count))
+	log_message("  Locked: " + str(achievements.size() - unlocked_count))
+	
+	if achievements.size() > 0:
+		log_message("  Sample achievements:")
+		for i in range(min(3, achievements.size())):
+			var ach = achievements[i]
+			var status = "🔓" if ach.get("isUnlocked", false) else "🔒"
+			log_message("    " + status + " " + str(ach.get("name", "Unknown")))
+	
+	test_results["get_achievements"] = true
+
+func _on_friend_request_sent(friendship: Dictionary) -> void:
+	log_message("✓ FRIEND REQUEST SENT")
+	log_message("  Friendship ID: " + str(friendship.get("id", "")))
+	log_message("  Status: " + str(friendship.get("status", "PENDING")))
+	test_results["send_friend_request"] = true
+
+func _on_friend_request_accepted(friend: Dictionary) -> void:
+	log_message("🤝 FRIEND REQUEST ACCEPTED")
+	log_message("  Friend: " + str(friend.get("username", "Unknown")))
+	log_message("  Player ID: " + str(friend.get("id", "")))
+
+func _on_friends_loaded(friends: Array, count: int) -> void:
+	log_message("✓ FRIENDS LIST LOADED")
+	log_message("  Total Friends: " + str(count))
+	
+	if friends.size() > 0:
+		log_message("  Your friends:")
+		for i in range(min(5, friends.size())):
+			var friend = friends[i]
+			var status = str(friend.get("onlineStatus", "offline"))
+			var status_icon = "🟢" if status == "online" else ("🟡" if status == "away" else "⚫")
+			log_message("    " + status_icon + " " + str(friend.get("username", "Unknown")))
+	else:
+		log_message("  No friends yet. Send some friend requests!")
+	
+	test_results["get_friends"] = true
+
+func _on_pending_requests_loaded(requests: Array) -> void:
+	log_message("✓ PENDING REQUESTS LOADED")
+	log_message("  Total Pending: " + str(requests.size()))
+	
+	if requests.size() > 0:
+		log_message("  Pending requests:")
+		for i in range(min(5, requests.size())):
+			var request = requests[i]
+			var requester = request.get("requester", {})
+			log_message("    From: " + str(requester.get("username", "Unknown")))
+			log_message("      ID: " + str(request.get("id", "")))
+	else:
+		log_message("  No pending requests")
+	
+	test_results["get_pending_requests"] = true
+
+func _on_players_found(players: Array) -> void:
+	log_message("✓ PLAYERS FOUND")
+	log_message("  Results: " + str(players.size()))
+	
+	if players.size() > 0:
+		log_message("  Players:")
+		for i in range(min(5, players.size())):
+			var player = players[i]
+			var relationship = str(player.get("relationshipStatus", "none"))
+			var status_text = ""
+			match relationship:
+				"friend":
+					status_text = " (Already friends)"
+				"pending_sent":
+					status_text = " (Request sent)"
+				"pending_received":
+					status_text = " (Wants to be friends)"
+				"blocked":
+					status_text = " (Blocked)"
+			
+			log_message("    " + str(player.get("username", "Unknown")) + status_text)
+			log_message("      ID: " + str(player.get("id", "")))
+	else:
+		log_message("  No players found")
+	
+	test_results["search_players"] = true
+
+func _on_player_blocked() -> void:
+	log_message("✓ PLAYER BLOCKED")
+	log_message("  Player has been blocked successfully")
+	test_results["block_player"] = true
+
+func _on_friend_leaderboard_loaded(leaderboard_slug: String, entries: Array) -> void:
+	log_message("✓ FRIEND LEADERBOARD LOADED")
+	log_message("  Leaderboard: " + leaderboard_slug)
+	log_message("  Entries: " + str(entries.size()))
+	
+	if entries.size() > 0:
+		log_message("  Friend rankings:")
+		for i in range(min(5, entries.size())):
+			var entry = entries[i]
+			var is_you = entry.get("isCurrentPlayer", false)
+			var marker = " (You)" if is_you else ""
+			log_message("    #" + str(entry.get("rank", i+1)) + " - " + str(entry.get("username", "Unknown")) + ": " + str(entry.get("score", 0)) + marker)
+	else:
+		log_message("  No friend scores yet")
+	
+	test_results["get_friend_leaderboard"] = true
 
 func _on_error(error_message: String) -> void:
 	log_message("✗ ERROR: " + error_message, true)

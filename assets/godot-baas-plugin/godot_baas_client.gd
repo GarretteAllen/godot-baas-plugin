@@ -15,6 +15,9 @@ var enable_offline_queue: bool = true
 var max_queue_size: int = 50
 var queue_timeout_seconds: int = 300  # 5 minutes
 
+# Request signing configuration
+var enable_request_signing: bool = true  # Set to false for development/testing
+
 # API Endpoints (constants for better maintainability)
 const ENDPOINT_AUTH_REGISTER = "/api/v1/game/auth/register"
 const ENDPOINT_AUTH_LOGIN = "/api/v1/game/auth/login"
@@ -23,6 +26,11 @@ const ENDPOINT_AUTH_LINK = "/api/v1/game/auth/link-account"
 const ENDPOINT_PLAYER_DATA = "/api/v1/game/players/@me/data"
 const ENDPOINT_LEADERBOARDS = "/api/v1/game/leaderboards"
 const ENDPOINT_ANALYTICS = "/api/v1/game/analytics/events"
+const ENDPOINT_FRIENDS = "/api/v1/game/friends"
+const ENDPOINT_FRIEND_REQUEST = "/api/v1/game/friends/request"
+const ENDPOINT_FRIEND_SEARCH = "/api/v1/game/friends/search"
+const ENDPOINT_FRIEND_BLOCK = "/api/v1/game/friends/block"
+const ENDPOINT_FRIEND_LEADERBOARD = "/api/v1/game/friends/leaderboard"
 
 # Connection state
 enum ConnectionState {
@@ -73,6 +81,28 @@ signal data_conflict(key: String, server_version: int, server_data: Variant)
 # Signals for leaderboards
 signal score_submitted(leaderboard: String, rank: int)
 signal leaderboard_loaded(leaderboard: String, entries: Array)
+
+# Signals for achievements
+signal achievement_unlocked(achievement: Dictionary)
+signal achievement_progress_updated(achievement: Dictionary)
+signal achievement_unlock_failed(error: String)
+signal achievements_loaded(achievements: Array)
+
+# Signals for friends
+signal friend_request_sent(friendship: Dictionary)
+signal friend_request_received(request: Dictionary)
+signal friend_request_accepted(friend: Dictionary)
+signal friend_request_declined()
+signal friend_request_cancelled()
+signal friends_loaded(friends: Array, count: int)
+signal friend_removed()
+signal pending_requests_loaded(requests: Array)
+signal sent_requests_loaded(requests: Array)
+signal players_found(players: Array)
+signal player_blocked()
+signal player_unblocked()
+signal blocked_players_loaded(players: Array)
+signal friend_leaderboard_loaded(leaderboard_slug: String, entries: Array)
 
 # General error signal
 signal error(error_message: String)
@@ -211,6 +241,36 @@ func _process_queue() -> void:
 	_processing_queue = false
 	queue_processed.emit(successful, failed)
 	print("[GodotBaaS] Queue processed: ", successful, " successful, ", failed, " failed")
+
+## Process next queued request (called after a request completes)
+func _process_next_queued_request() -> void:
+	if _request_queue.is_empty() or not _current_request.is_empty():
+		return
+	
+	# Get next request from queue
+	var queued_request = _request_queue.pop_front()
+	
+	# Check if request has expired
+	var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
+	if age > queue_timeout_seconds:
+		print("[GodotBaaS] Queued request expired (age: ", age, "s)")
+		# Try next one
+		_process_next_queued_request()
+		return
+	
+	print("[GodotBaaS] Processing queued request (ID: ", queued_request.get("id"), ")")
+	
+	# Set as current request and execute
+	_current_request = {
+		"id": queued_request.get("id"),
+		"method": queued_request.get("method"),
+		"endpoint": queued_request.get("endpoint"),
+		"body": queued_request.get("body"),
+		"requires_auth": queued_request.get("requires_auth"),
+		"priority": queued_request.get("priority")
+	}
+	_retry_count = 0
+	_execute_request()
 
 # Security helper functions
 
@@ -482,6 +542,65 @@ func get_player_rank(leaderboard_slug: String) -> void:
 	
 	_make_request("GET", ENDPOINT_LEADERBOARDS + "/" + leaderboard_slug + "/rank", {}, true)
 
+# Achievement methods
+
+## Grant an achievement to the current player
+## Awards an achievement to the authenticated player
+## @param achievement_id: Unique identifier for the achievement to grant
+func grant_achievement(achievement_id: String) -> void:
+	if not _authenticated or player_token == "":
+		achievement_unlock_failed.emit("Cannot grant achievement: Not authenticated")
+		return
+	
+	var body = {
+		"achievementId": achievement_id
+	}
+	
+	_make_request("POST", "/api/v1/game/achievements/grant", body, true)
+
+## Update achievement progress
+## Updates the progress value for a progress-based achievement
+## Automatically grants the achievement when progress reaches the target value
+## @param achievement_id: Unique identifier for the achievement
+## @param progress: The progress value to set or increment
+## @param increment: If true, adds to current progress; if false, sets progress to the value
+func update_achievement_progress(achievement_id: String, progress: int, increment: bool = false) -> void:
+	if not _authenticated or player_token == "":
+		achievement_unlock_failed.emit("Cannot update achievement progress: Not authenticated")
+		return
+	
+	var body = {
+		"achievementId": achievement_id,
+		"progress": progress,
+		"increment": increment
+	}
+	
+	_make_request("POST", "/api/v1/game/achievements/progress", body, true)
+
+## Get all achievements for the current player
+## Retrieves all achievement definitions with unlock status and progress
+## @param include_hidden: If true, includes hidden achievements; if false, only shows hidden achievements that are unlocked
+func get_achievements(include_hidden: bool = false) -> void:
+	if not _authenticated or player_token == "":
+		achievement_unlock_failed.emit("Cannot get achievements: Not authenticated")
+		return
+	
+	var endpoint = "/api/v1/game/achievements"
+	if include_hidden:
+		endpoint += "?includeHidden=true"
+	
+	_make_request("GET", endpoint, {}, true)
+
+## Get a specific achievement for the current player
+## Retrieves a single achievement with unlock status and progress
+## @param achievement_id: Unique identifier for the achievement
+func get_achievement(achievement_id: String) -> void:
+	if not _authenticated or player_token == "":
+		achievement_unlock_failed.emit("Cannot get achievement: Not authenticated")
+		return
+	
+	_make_request("GET", "/api/v1/game/achievements/" + achievement_id, {}, true)
+
 # Analytics methods
 
 ## Track analytics event
@@ -504,6 +623,142 @@ func track_event(event_name: String, properties: Dictionary = {}) -> void:
 	# If not authenticated, events are still tracked but without player association
 	var requires_auth = _authenticated and player_token != ""
 	_make_request("POST", ENDPOINT_ANALYTICS, body, requires_auth, RequestPriority.LOW)
+
+# Friend Request methods
+
+## Send a friend request to another player
+## @param player_identifier: Player ID or username to send request to
+func send_friend_request(player_identifier: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot send friend request: Not authenticated")
+		return
+	
+	var body = {
+		"targetPlayerId": player_identifier
+	}
+	
+	_make_request("POST", ENDPOINT_FRIEND_REQUEST, body, true)
+
+## Accept a friend request
+## @param friendship_id: ID of the friendship record to accept
+func accept_friend_request(friendship_id: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot accept friend request: Not authenticated")
+		return
+	
+	_make_request("POST", ENDPOINT_FRIEND_REQUEST + "/" + friendship_id + "/accept", {}, true)
+
+## Decline a friend request
+## @param friendship_id: ID of the friendship record to decline
+func decline_friend_request(friendship_id: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot decline friend request: Not authenticated")
+		return
+	
+	_make_request("POST", ENDPOINT_FRIEND_REQUEST + "/" + friendship_id + "/decline", {}, true)
+
+## Cancel a sent friend request
+## @param friendship_id: ID of the friendship record to cancel
+func cancel_friend_request(friendship_id: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot cancel friend request: Not authenticated")
+		return
+	
+	_make_request("DELETE", ENDPOINT_FRIEND_REQUEST + "/" + friendship_id, {}, true)
+
+# Friend List methods
+
+## Get the current player's friend list
+func get_friends() -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot get friends: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIENDS, {}, true)
+
+## Remove a friend from the friend list
+## @param friend_id: Player ID of the friend to remove
+func remove_friend(friend_id: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot remove friend: Not authenticated")
+		return
+	
+	_make_request("DELETE", ENDPOINT_FRIENDS + "/" + friend_id, {}, true)
+
+## Get all pending friend requests received by the current player
+func get_pending_requests() -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot get pending requests: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIENDS + "/requests/pending", {}, true)
+
+## Get all friend requests sent by the current player
+func get_sent_requests() -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot get sent requests: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIENDS + "/requests/sent", {}, true)
+
+# Player Search methods
+
+## Search for players by username or player ID
+## @param query: Search query (username or player ID)
+func search_players(query: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot search players: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIEND_SEARCH + "?q=" + query, {}, true)
+
+# Player Blocking methods
+
+## Block a player to prevent friend requests and interactions
+## @param player_id: Player ID to block
+## @param reason: Optional reason for blocking
+func block_player(player_id: String, reason: String = "") -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot block player: Not authenticated")
+		return
+	
+	var body = {
+		"playerId": player_id
+	}
+	
+	if reason != "":
+		body["reason"] = reason
+	
+	_make_request("POST", ENDPOINT_FRIEND_BLOCK, body, true)
+
+## Unblock a previously blocked player
+## @param player_id: Player ID to unblock
+func unblock_player(player_id: String) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot unblock player: Not authenticated")
+		return
+	
+	_make_request("DELETE", ENDPOINT_FRIEND_BLOCK + "/" + player_id, {}, true)
+
+## Get list of all blocked players
+func get_blocked_players() -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot get blocked players: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIEND_BLOCK, {}, true)
+
+# Friend Leaderboard methods
+
+## Get leaderboard entries filtered to only friends
+## @param leaderboard_slug: Unique identifier for the leaderboard
+## @param limit: Maximum number of entries to retrieve (default: 100)
+func get_friend_leaderboard(leaderboard_slug: String, limit: int = 100) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot get friend leaderboard: Not authenticated")
+		return
+	
+	_make_request("GET", ENDPOINT_FRIEND_LEADERBOARD + "/" + leaderboard_slug + "?limit=" + str(limit), {}, true)
 
 # Internal HTTP request handler with priority support
 func _make_request(method: String, endpoint: String, body: Dictionary = {}, requires_auth: bool = false, priority: RequestPriority = RequestPriority.NORMAL) -> int:
@@ -540,6 +795,23 @@ func _make_request(method: String, endpoint: String, body: Dictionary = {}, requ
 			_request_queue.append(queued_request)
 		
 		print("[GodotBaaS] Request queued (ID: ", request_id, ", Priority: ", priority, ", Queue size: ", _request_queue.size(), ")")
+		request_queued.emit(request_id)
+		return request_id
+	
+	# Check if HTTPRequest is currently busy
+	if _http_client.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		# Queue this request to be executed after current one completes
+		print("[GodotBaaS] HTTPRequest busy, queueing request (ID: ", request_id, ")")
+		var queued_request = {
+			"id": request_id,
+			"method": method,
+			"endpoint": endpoint,
+			"body": body,
+			"requires_auth": requires_auth,
+			"priority": priority,
+			"timestamp": Time.get_unix_time_from_system()
+		}
+		_request_queue.append(queued_request)
 		request_queued.emit(request_id)
 		return request_id
 	
@@ -584,19 +856,22 @@ func _execute_request() -> void:
 	else:
 		body_string = "{}"
 	
-	# Generate security headers (Phase 1 Security)
-	var timestamp = _get_timestamp()
-	var nonce = _generate_nonce()
-	var signature = _generate_signature(body_string, timestamp)
-	
-	# Prepare headers
+	# Prepare base headers
 	var headers: PackedStringArray = [
 		"Content-Type: application/json",
-		"X-API-Key: " + api_key,
-		"X-Signature: " + signature,
-		"X-Timestamp: " + timestamp,
-		"X-Nonce: " + nonce
+		"X-API-Key: " + api_key
 	]
+	
+	# Add security headers if signing is enabled
+	# Note: Development API keys (gb_dev_*) bypass validation on the server
+	if enable_request_signing:
+		var timestamp = _get_timestamp()
+		var nonce = _generate_nonce()
+		var signature = _generate_signature(body_string, timestamp)
+		
+		headers.append("X-Signature: " + signature)
+		headers.append("X-Timestamp: " + timestamp)
+		headers.append("X-Nonce: " + nonce)
 	
 	# Add player token header for authenticated requests
 	if requires_auth and player_token != "":
@@ -644,6 +919,11 @@ func _handle_request_failure(error_message: String) -> void:
 
 # Retry timeout callback
 func _on_retry_timeout() -> void:
+	# Check if there's still a request to retry
+	if _current_request.is_empty() or not _current_request.has("method"):
+		print("[GodotBaaS] Retry cancelled - no active request")
+		return
+	
 	print("[GodotBaaS] Retrying request...")
 	_execute_request()
 
@@ -728,6 +1008,10 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_connection_state = ConnectionState.CONNECTED
 	_is_online = true  # Mark as online on successful response
 	
+	# Cancel any pending retry timer
+	if _retry_timer and _retry_timer.time_left > 0:
+		_retry_timer.stop()
+	
 	# Remove from active requests
 	var request_id = _current_request.get("id", -1)
 	if request_id != -1:
@@ -736,6 +1020,9 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_current_request.clear()  # Clear request context on success
 	_retry_count = 0  # Reset retry count
 	_handle_success_response(response_code, response_data)
+	
+	# Process next request in queue if any
+	_process_next_queued_request()
 
 # Handle error responses with specific error codes
 func _handle_error_response(response_code: int, response_data: Variant) -> void:
@@ -799,16 +1086,22 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 				error.emit("Forbidden: " + error_message)
 		
 		404:
-			# Not Found
-			error.emit("Not found: " + error_message)
+			# Not Found - could be achievement not found
+			if error_message.to_lower().contains("achievement"):
+				achievement_unlock_failed.emit(error_message)
+			else:
+				error.emit("Not found: " + error_message)
 		
 		500, 502, 503, 504:
 			# Server errors
 			error.emit("Server error: " + error_message)
 		
 		_:
-			# Generic error
-			error.emit("HTTP " + str(response_code) + ": " + error_message)
+			# Generic error - check if it's achievement-related
+			if error_message.to_lower().contains("achievement"):
+				achievement_unlock_failed.emit(error_message)
+			else:
+				error.emit("HTTP " + str(response_code) + ": " + error_message)
 
 # Handle successful responses
 func _handle_success_response(_response_code: int, response_data: Variant) -> void:
@@ -896,6 +1189,138 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 		var single_entry = [response_data]
 		leaderboard_loaded.emit(leaderboard_slug, single_entry)
 		return
+	
+	# Check if this is an achievement grant response
+	if response_data.has("success") and response_data.has("achievement") and response_data.has("isNewUnlock"):
+		var achievement = response_data["achievement"]
+		var is_new_unlock = response_data["isNewUnlock"]
+		
+		# Only emit achievement_unlocked if this is a new unlock
+		if is_new_unlock:
+			print("[GodotBaaS] Achievement unlocked: ", achievement.get("name", "Unknown"))
+			achievement_unlocked.emit(achievement)
+		else:
+			print("[GodotBaaS] Achievement already unlocked: ", achievement.get("name", "Unknown"))
+		return
+	
+	# Check if this is an achievement progress update response
+	if response_data.has("success") and response_data.has("achievement") and response_data.has("unlocked"):
+		var achievement = response_data["achievement"]
+		var unlocked = response_data["unlocked"]
+		
+		# Emit progress updated signal
+		print("[GodotBaaS] Achievement progress updated: ", achievement.get("name", "Unknown"))
+		achievement_progress_updated.emit(achievement)
+		
+		# If the achievement was unlocked by this progress update, also emit unlocked signal
+		if unlocked:
+			print("[GodotBaaS] Achievement unlocked through progress: ", achievement.get("name", "Unknown"))
+			achievement_unlocked.emit(achievement)
+		return
+	
+	# Check if this is a get achievements response (list of achievements)
+	if response_data.has("achievements") and response_data.has("stats"):
+		var achievements = response_data["achievements"]
+		print("[GodotBaaS] Loaded ", achievements.size(), " achievements")
+		achievements_loaded.emit(achievements)
+		return
+	
+	# Check if this is a single achievement response (from get_achievement)
+	# This should be checked after the grant/progress responses to avoid conflicts
+	if response_data.has("id") and response_data.has("name") and response_data.has("description"):
+		# This looks like a single achievement object
+		print("[GodotBaaS] Loaded single achievement: ", response_data.get("name", "Unknown"))
+		achievements_loaded.emit([response_data])
+		return
+	
+	# Check if this is a friend request sent response
+	if response_data.has("success") and response_data.has("data"):
+		var data = response_data["data"]
+		
+		# Friend request sent
+		if data.has("requesterId") and data.has("addresseeId") and data.has("status"):
+			if data["status"] == "PENDING":
+				print("[GodotBaaS] Friend request sent")
+				friend_request_sent.emit(data)
+				return
+			elif data["status"] == "ACCEPTED":
+				print("[GodotBaaS] Friend request accepted")
+				friend_request_accepted.emit(data)
+				return
+		
+		# Friends loaded
+		if data.has("friends") and data.has("count"):
+			var friends = data["friends"]
+			var count = data["count"]
+			print("[GodotBaaS] Loaded ", friends.size(), " friends")
+			friends_loaded.emit(friends, count)
+			return
+		
+		# Player search results
+		if data is Array and data.size() > 0 and data[0].has("username"):
+			print("[GodotBaaS] Found ", data.size(), " players")
+			players_found.emit(data)
+			return
+		
+		# Blocked players loaded
+		if data is Array and data.size() >= 0:
+			# Check if this looks like a blocked players list
+			var is_blocked_list = true
+			for item in data:
+				if not item.has("id"):
+					is_blocked_list = false
+					break
+			
+			if is_blocked_list:
+				print("[GodotBaaS] Loaded ", data.size(), " blocked players")
+				blocked_players_loaded.emit(data)
+				return
+		
+		# Pending/sent requests loaded
+		if data is Array:
+			# This could be pending or sent requests
+			print("[GodotBaaS] Loaded ", data.size(), " friend requests")
+			# Emit to both signals - the caller will know which one they requested
+			pending_requests_loaded.emit(data)
+			sent_requests_loaded.emit(data)
+			return
+	
+	# Check for simple success messages (friend removed, blocked, unblocked, etc.)
+	if response_data.has("success") and response_data.has("message"):
+		var message = response_data["message"]
+		
+		if "removed" in message.to_lower():
+			print("[GodotBaaS] Friend removed")
+			friend_removed.emit()
+			return
+		elif "declined" in message.to_lower():
+			print("[GodotBaaS] Friend request declined")
+			friend_request_declined.emit()
+			return
+		elif "cancelled" in message.to_lower():
+			print("[GodotBaaS] Friend request cancelled")
+			friend_request_cancelled.emit()
+			return
+		elif "blocked" in message.to_lower() and "un" not in message.to_lower():
+			print("[GodotBaaS] Player blocked")
+			player_blocked.emit()
+			return
+		elif "unblocked" in message.to_lower():
+			print("[GodotBaaS] Player unblocked")
+			player_unblocked.emit()
+			return
+	
+	# Check if this is a friend leaderboard response
+	if response_data.has("success") and response_data.has("data"):
+		var data = response_data["data"]
+		if data is Array and data.size() > 0:
+			# Check if this looks like leaderboard entries
+			if data[0].has("rank") or data[0].has("score"):
+				# This could be a friend leaderboard - we need to determine the slug
+				# For now, emit with empty slug - the caller will know which leaderboard they requested
+				print("[GodotBaaS] Loaded friend leaderboard entries")
+				friend_leaderboard_loaded.emit("", data)
+				return
 	
 	# Additional response handlers will be added in subsequent tasks
 	pass
