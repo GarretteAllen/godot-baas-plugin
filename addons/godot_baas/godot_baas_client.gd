@@ -1192,17 +1192,23 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 		return
 	
 	# Check if this is a leaderboard entries response
-	if response_data.has("entries") and response_data.has("leaderboard"):
+	if response_data.has("entries"):
 		var entries = response_data["entries"]
-		var leaderboard_info = response_data["leaderboard"]
 		var leaderboard_slug = ""
 		
-		# Extract leaderboard slug from leaderboard info
-		if typeof(leaderboard_info) == TYPE_DICTIONARY:
-			leaderboard_slug = leaderboard_info.get("slug", "")
-		elif typeof(leaderboard_info) == TYPE_STRING:
-			leaderboard_slug = leaderboard_info
+		# Try to get slug from different possible locations
+		if response_data.has("leaderboardSlug"):
+			# Direct slug field (newer API format)
+			leaderboard_slug = response_data.get("leaderboardSlug", "")
+		elif response_data.has("leaderboard"):
+			# Nested leaderboard object (older API format)
+			var leaderboard_info = response_data["leaderboard"]
+			if typeof(leaderboard_info) == TYPE_DICTIONARY:
+				leaderboard_slug = leaderboard_info.get("slug", "")
+			elif typeof(leaderboard_info) == TYPE_STRING:
+				leaderboard_slug = leaderboard_info
 		
+		print("[GodotBaaS] Emitting leaderboard_loaded - Slug: ", leaderboard_slug, ", Entries: ", entries.size())
 		leaderboard_loaded.emit(leaderboard_slug, entries)
 		return
 	
