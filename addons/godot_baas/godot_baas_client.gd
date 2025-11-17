@@ -877,6 +877,11 @@ func _execute_request() -> void:
 	var body_string = ""
 	if body.size() > 0:
 		body_string = JSON.stringify(body)
+		# Fix: Remove .0 from integers to match backend serialization
+		# Godot serializes all numbers as floats (e.g., 5 becomes 5.0)
+		# But Node.js serializes integers without .0
+		# This causes signature mismatch
+		body_string = _normalize_json_numbers(body_string)
 	else:
 		body_string = "{}"
 	
@@ -892,6 +897,10 @@ func _execute_request() -> void:
 		var timestamp = _get_timestamp()
 		var nonce = _generate_nonce()
 		var signature = _generate_signature(body_string, timestamp)
+		
+		print("[GodotBaaS] Signing request - Body: ", body_string)
+		print("[GodotBaaS] Timestamp: ", timestamp)
+		print("[GodotBaaS] Signature: ", signature.substr(0, 20), "...")
 		
 		headers.append("X-Signature: " + signature)
 		headers.append("X-Timestamp: " + timestamp)
@@ -1155,6 +1164,11 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 			if data.has("value") and data.has("key"):
 				var key = data["key"]
 				var value = data["value"]
+				
+				# Include version in the value for convenience
+				if data.has("version") and typeof(value) == TYPE_DICTIONARY:
+					value["_version"] = data["version"]
+				
 				print("[GodotBaaS] Emitting data_loaded signal - Key: ", key, ", Value: ", value)
 				data_loaded.emit(key, value)
 				return
@@ -1171,6 +1185,11 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 	if response_data.has("value") and response_data.has("key"):
 		var key = response_data["key"]
 		var value = response_data["value"]
+		
+		# Include version in the value for convenience
+		if response_data.has("version") and typeof(value) == TYPE_DICTIONARY:
+			value["_version"] = response_data["version"]
+		
 		print("[GodotBaaS] Emitting data_loaded signal (root) - Key: ", key, ", Value: ", value)
 		data_loaded.emit(key, value)
 		return
@@ -1192,23 +1211,17 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 		return
 	
 	# Check if this is a leaderboard entries response
-	if response_data.has("entries"):
+	if response_data.has("entries") and response_data.has("leaderboard"):
 		var entries = response_data["entries"]
+		var leaderboard_info = response_data["leaderboard"]
 		var leaderboard_slug = ""
 		
-		# Try to get slug from different possible locations
-		if response_data.has("leaderboardSlug"):
-			# Direct slug field (newer API format)
-			leaderboard_slug = response_data.get("leaderboardSlug", "")
-		elif response_data.has("leaderboard"):
-			# Nested leaderboard object (older API format)
-			var leaderboard_info = response_data["leaderboard"]
-			if typeof(leaderboard_info) == TYPE_DICTIONARY:
-				leaderboard_slug = leaderboard_info.get("slug", "")
-			elif typeof(leaderboard_info) == TYPE_STRING:
-				leaderboard_slug = leaderboard_info
+		# Extract leaderboard slug from leaderboard info
+		if typeof(leaderboard_info) == TYPE_DICTIONARY:
+			leaderboard_slug = leaderboard_info.get("slug", "")
+		elif typeof(leaderboard_info) == TYPE_STRING:
+			leaderboard_slug = leaderboard_info
 		
-		print("[GodotBaaS] Emitting leaderboard_loaded - Slug: ", leaderboard_slug, ", Entries: ", entries.size())
 		leaderboard_loaded.emit(leaderboard_slug, entries)
 		return
 	
@@ -1460,3 +1473,15 @@ func _generate_device_id() -> String:
 			   hex_string.substr(20, 12)
 	
 	return uuid
+
+
+## Normalize JSON numbers to match backend serialization
+## Godot serializes all numbers as floats (5 -> 5.0)
+## Node.js serializes integers without decimals (5 -> 5)
+## This causes signature mismatches
+func _normalize_json_numbers(json_string: String) -> String:
+	# Use regex to replace .0 with nothing for integer values
+	# Match pattern: number followed by .0 (but not .0X where X is another digit)
+	var regex = RegEx.new()
+	regex.compile("(\\d+)\\.0(?!\\d)")
+	return regex.sub(json_string, "$1", true)
