@@ -66,6 +66,7 @@ var _active_requests: Dictionary = {}  # Track cancellable requests
 # Signals for authentication
 signal authenticated(player_data: Dictionary)
 signal auth_failed(error: String)
+signal username_updated(player_data: Dictionary)
 
 # Signals for network state
 signal network_online()
@@ -403,6 +404,29 @@ func link_account(email: String, password: String, username: String = "") -> voi
 	
 	# This request requires authentication (player token from anonymous session)
 	_make_request("POST", ENDPOINT_AUTH_LINK, body, true)
+
+## Set username for current player
+## Allows anonymous players to set a username without linking to email
+## Username must be unique within the project
+## @param username: Desired username (3-20 characters)
+func set_username(username: String) -> void:
+	if not _authenticated or player_token == "":
+		auth_failed.emit("Cannot set username: Not authenticated")
+		return
+	
+	if username.strip_edges().length() < 3:
+		error.emit("Username must be at least 3 characters")
+		return
+	
+	if username.strip_edges().length() > 20:
+		error.emit("Username must be at most 20 characters")
+		return
+	
+	var body = {
+		"username": username.strip_edges()
+	}
+	
+	_make_request("POST", "/api/v1/game/auth/set-username", body, true)
 
 # Cloud Save methods
 
@@ -1189,6 +1213,15 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 		var single_entry = [response_data]
 		leaderboard_loaded.emit(leaderboard_slug, single_entry)
 		return
+	
+	# Check if this is a username update response
+	if response_data.has("success") and response_data.has("player") and response_data.has("message"):
+		var message = response_data["message"]
+		if "username" in message.to_lower():
+			var player = response_data["player"]
+			print("[GodotBaaS] Username updated: ", player.get("username", ""))
+			username_updated.emit(player)
+			return
 	
 	# Check if this is an achievement grant response
 	if response_data.has("success") and response_data.has("achievement") and response_data.has("isNewUnlock"):
