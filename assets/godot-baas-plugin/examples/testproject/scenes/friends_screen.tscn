@@ -1,0 +1,148 @@
+[gd_scene load_steps=2 format=3 uid="uid://e7zo1a0p8sxyk"]
+
+[ext_resource type="Script" path="res://scripts/friends_screen.gd" id="1"]
+
+[node name="FriendsScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.15, 0.15, 0.2, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 50
+theme_override_constants/margin_top = 80
+theme_override_constants/margin_right = 50
+theme_override_constants/margin_bottom = 50
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "👥 Friends"
+horizontal_alignment = 1
+
+[node name="SearchPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/SearchPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 15
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 15
+theme_override_constants/margin_bottom = 10
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/SearchPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/SearchPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+text = "🔍 Search:"
+
+[node name="SearchInput" type="LineEdit" parent="MarginContainer/VBoxContainer/SearchPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Enter username or player ID..."
+
+[node name="SearchButton" type="Button" parent="MarginContainer/VBoxContainer/SearchPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "Search"
+
+[node name="TabContainer" type="TabContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Friends" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 0
+
+[node name="RefreshButton" type="Button" parent="MarginContainer/VBoxContainer/TabContainer/Friends"]
+custom_minimum_size = Vector2(0, 35)
+layout_mode = 2
+text = "🔄 Refresh Friends List"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer/Friends"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FriendsList" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Friends/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="Pending" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 1
+
+[node name="RefreshButton" type="Button" parent="MarginContainer/VBoxContainer/TabContainer/Pending"]
+custom_minimum_size = Vector2(0, 35)
+layout_mode = 2
+text = "🔄 Refresh Pending Requests"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer/Pending"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PendingList" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Pending/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="Search" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 2
+
+[node name="InfoLabel" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Search"]
+layout_mode = 2
+text = "Search results will appear here"
+horizontal_alignment = 1
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer/Search"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SearchList" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Search/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="BackButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 120.0
+offset_bottom = 60.0
+text = "← Back"
+
+[connection signal="pressed" from="BackButton" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/SearchPanel/MarginContainer/HBoxContainer/SearchButton" to="." method="_on_search_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/TabContainer/Friends/RefreshButton" to="." method="_on_refresh_friends_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/TabContainer/Pending/RefreshButton" to="." method="_on_refresh_pending_pressed"]

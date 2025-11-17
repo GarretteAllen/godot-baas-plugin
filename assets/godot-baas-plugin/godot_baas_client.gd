@@ -1256,6 +1256,14 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 			friends_loaded.emit(friends, count)
 			return
 		
+		# Pending/sent requests loaded (check this BEFORE player search)
+		if data is Array and data.size() > 0 and (data[0].has("requesterId") or data[0].has("requester")):
+			# This is a friend request list
+			print("[GodotBaaS] Loaded ", data.size(), " friend requests")
+			pending_requests_loaded.emit(data)
+			sent_requests_loaded.emit(data)
+			return
+		
 		# Player search results
 		if data is Array and data.size() > 0 and data[0].has("username"):
 			print("[GodotBaaS] Found ", data.size(), " players")
@@ -1276,11 +1284,9 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 				blocked_players_loaded.emit(data)
 				return
 		
-		# Pending/sent requests loaded
+		# Empty array fallback (could be empty pending requests)
 		if data is Array:
-			# This could be pending or sent requests
-			print("[GodotBaaS] Loaded ", data.size(), " friend requests")
-			# Emit to both signals - the caller will know which one they requested
+			print("[GodotBaaS] Loaded empty array - assuming friend requests")
 			pending_requests_loaded.emit(data)
 			sent_requests_loaded.emit(data)
 			return

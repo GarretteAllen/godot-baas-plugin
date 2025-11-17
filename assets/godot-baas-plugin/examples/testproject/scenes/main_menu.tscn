@@ -1,0 +1,144 @@
+[gd_scene load_steps=2 format=3 uid="uid://bqxm8y7n5qvwh"]
+
+[ext_resource type="Script" uid="uid://dtf0ch5fwiy7d" path="res://scripts/main_menu.gd" id="1"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.15, 0.15, 0.2, 1)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Title" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = "🎮 Godot BaaS Test Game"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Showcasing Backend-as-a-Service Features"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Status: Not Connected"
+horizontal_alignment = 1
+
+[node name="PlayerLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Player: Not Logged In"
+horizontal_alignment = 1
+
+[node name="HSeparator2" type="HSeparator" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ButtonsContainer" type="VBoxContainer" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="QuickStartButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "🚀 Quick Start (Device Login)"
+
+[node name="LoginButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "🔑 Login / Register"
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+layout_mode = 2
+
+[node name="LeaderboardButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+disabled = true
+text = "🏆 Leaderboards"
+
+[node name="FriendsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+disabled = true
+text = "👥 Friends"
+
+[node name="AchievementsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+disabled = true
+text = "🏅 Achievements"
+
+[node name="GameButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+disabled = true
+text = "🎯 Play Game"
+
+[node name="HSeparator2" type="HSeparator" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+layout_mode = 2
+
+[node name="SettingsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "⚙️ Settings"
+
+[node name="Version" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -30.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 12
+text = "Godot BaaS Plugin v0.0.1"
+horizontal_alignment = 2
+
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/QuickStartButton" to="." method="_on_quick_start_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/LoginButton" to="." method="_on_login_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/LeaderboardButton" to="." method="_on_leaderboard_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/FriendsButton" to="." method="_on_friends_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/AchievementsButton" to="." method="_on_achievements_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/GameButton" to="." method="_on_game_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ButtonsContainer/SettingsButton" to="." method="_on_settings_pressed"]

@@ -1,0 +1,221 @@
+[gd_scene load_steps=2 format=3 uid="uid://c5xm9y8n6qvwi"]
+
+[ext_resource type="Script" path="res://scripts/auth_screen.gd" id="1"]
+
+[node name="AuthScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.15, 0.15, 0.2, 1)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 30
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "🔑 Authentication"
+horizontal_alignment = 1
+
+[node name="TabContainer" type="TabContainer" parent="CenterContainer/Panel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 400)
+layout_mode = 2
+
+[node name="Login" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 0
+
+[node name="Label" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+text = "Login to your existing account"
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+
+[node name="EmailLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+text = "Email:"
+
+[node name="LoginEmail" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+placeholder_text = "your@email.com"
+
+[node name="PasswordLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+text = "Password:"
+
+[node name="LoginPassword" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+secret = true
+placeholder_text = "••••••••"
+
+[node name="HSeparator2" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+
+[node name="LoginButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Login"
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+text = " "
+horizontal_alignment = 1
+
+[node name="Register" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 1
+
+[node name="Label" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+text = "Create a new account"
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+
+[node name="UsernameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+text = "Username:"
+
+[node name="RegisterUsername" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+placeholder_text = "YourUsername"
+
+[node name="EmailLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+text = "Email:"
+
+[node name="RegisterEmail" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+placeholder_text = "your@email.com"
+
+[node name="PasswordLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+text = "Password:"
+
+[node name="RegisterPassword" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+secret = true
+placeholder_text = "••••••••"
+
+[node name="HSeparator2" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+
+[node name="RegisterButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Register"
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+text = " "
+horizontal_alignment = 1
+
+[node name="LinkAccount" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 2
+
+[node name="Label" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+text = "Link your anonymous account to email"
+
+[node name="InfoLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "This will preserve your progress and allow you to login from other devices."
+autowrap_mode = 3
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+
+[node name="UsernameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+text = "Username:"
+
+[node name="LinkUsername" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+placeholder_text = "YourUsername"
+
+[node name="EmailLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+text = "Email:"
+
+[node name="LinkEmail" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+placeholder_text = "your@email.com"
+
+[node name="PasswordLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+text = "Password:"
+
+[node name="LinkPassword" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+secret = true
+placeholder_text = "••••••••"
+
+[node name="HSeparator2" type="HSeparator" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+
+[node name="LinkButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Link Account"
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount"]
+layout_mode = 2
+text = " "
+horizontal_alignment = 1
+
+[node name="BackButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 120.0
+offset_bottom = 60.0
+text = "← Back"
+
+[connection signal="pressed" from="BackButton" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Login/LoginButton" to="." method="_on_login_button_pressed"]
+[connection signal="pressed" from="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/Register/RegisterButton" to="." method="_on_register_button_pressed"]
+[connection signal="pressed" from="CenterContainer/Panel/MarginContainer/VBoxContainer/TabContainer/LinkAccount/LinkButton" to="." method="_on_link_button_pressed"]
