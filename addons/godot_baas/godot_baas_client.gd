@@ -330,7 +330,6 @@ func link_account(email: String, password: String, username: String = "") -> voi
 		"password": password
 	}
 	
-	# Add username if provided
 	if username != "":
 		body["username"] = username
 	
@@ -1049,12 +1048,23 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 			sent_requests_loaded.emit(data)
 			return
 		
+		var endpoint = _current_request.get("endpoint", "")
+		if endpoint.contains("/friends/search"):
+			print("[GodotBaaS] Found ", data.size(), " players")
+			players_found.emit(data)
+			return
+		
+		if endpoint.contains("/friends/block") and endpoint.contains("GET"):
+			print("[GodotBaaS] Loaded ", data.size(), " blocked players")
+			blocked_players_loaded.emit(data)
+			return
+		
 		if data is Array and data.size() > 0 and data[0].has("username"):
 			print("[GodotBaaS] Found ", data.size(), " players")
 			players_found.emit(data)
 			return
 		
-		if data is Array and data.size() >= 0:
+		if data is Array and data.size() > 0:
 			var is_blocked_list = true
 			for item in data:
 				if not item.has("id"):
@@ -1066,11 +1076,20 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 				blocked_players_loaded.emit(data)
 				return
 		
-		if data is Array:
-			print("[GodotBaaS] Loaded empty array - assuming friend requests")
-			pending_requests_loaded.emit(data)
-			sent_requests_loaded.emit(data)
-			return
+		if data is Array and data.size() == 0:
+			if endpoint.contains("/friends/search"):
+				print("[GodotBaaS] Found 0 players")
+				players_found.emit(data)
+				return
+			elif endpoint.contains("/friends/block"):
+				print("[GodotBaaS] Loaded 0 blocked players")
+				blocked_players_loaded.emit(data)
+				return
+			else:
+				print("[GodotBaaS] Loaded empty array - assuming friend requests")
+				pending_requests_loaded.emit(data)
+				sent_requests_loaded.emit(data)
+				return
 	
 	if response_data.has("success") and response_data.has("message"):
 		var message = response_data["message"]
@@ -1141,15 +1160,11 @@ func _handle_auth_success(response_data: Dictionary) -> void:
 	elif response_data.has("data"):
 		player_info = response_data["data"]
 	else:
-		# If no player object, use the response data itself
 		player_info = response_data.duplicate()
-		# Remove the token from player data
 		player_info.erase("playerToken")
 		player_info.erase("player_token")
 	
-	# Store player data
 	_player_data = player_info
-	
 	authenticated.emit(player_info)
 
 func _get_or_create_device_id() -> String:
