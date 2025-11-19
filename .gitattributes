@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+/**        export-ignore
+/addons    !export-ignore
+/addons/** !export-ignore
+
+*.md       export-ignore
+README*    export-ignore
+COMPATIBILITY_CHECK.md export-ignore
+integration_test.gd export-ignore
+full_test.tscn export-ignore
+full_test.gd export-ignore
+examples/** export-ignore
