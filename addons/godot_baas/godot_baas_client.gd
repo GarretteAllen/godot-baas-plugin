@@ -355,6 +355,13 @@ func set_username(username: String) -> void:
 	
 	_make_request("POST", "/api/v1/game/auth/set-username", body, true)
 
+func logout() -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot logout: Not authenticated")
+		return
+	
+	_make_request("POST", "/api/v1/game/auth/logout", {}, true, RequestPriority.HIGH)
+
 func save_data(key: String, value: Variant, version: int = 0) -> void:
 	if not _authenticated or player_token == "":
 		error.emit("Cannot save data: Not authenticated")
@@ -434,12 +441,18 @@ func get_leaderboard(leaderboard_slug: String, limit: int = 100) -> void:
 	
 	_make_request("GET", ENDPOINT_LEADERBOARDS + "/" + leaderboard_slug + "?limit=" + str(limit), {}, true)
 
-func get_player_rank(leaderboard_slug: String) -> void:
+func get_player_rank(leaderboard_slug: String, player_id: String = "") -> void:
 	if not _authenticated or player_token == "":
 		error.emit("Cannot get player rank: Not authenticated")
 		return
 	
-	_make_request("GET", ENDPOINT_LEADERBOARDS + "/" + leaderboard_slug + "/rank", {}, true)
+	var endpoint: String
+	if player_id == "":
+		endpoint = ENDPOINT_LEADERBOARDS + "/" + leaderboard_slug + "/me/rank"
+	else:
+		endpoint = ENDPOINT_LEADERBOARDS + "/" + leaderboard_slug + "/players/" + player_id + "/rank"
+	
+	_make_request("GET", endpoint, {}, true)
 
 func grant_achievement(achievement_id: String) -> void:
 	if not _authenticated or player_token == "":
@@ -1090,6 +1103,16 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 				print("[GodotBaaS] Loaded friend leaderboard entries")
 				friend_leaderboard_loaded.emit("", data)
 				return
+	
+	if response_data.has("success") and response_data.has("message"):
+		var message = response_data["message"]
+		if "logged out" in message.to_lower():
+			print("[GodotBaaS] Player logged out successfully")
+			_authenticated = false
+			player_token = ""
+			_player_data.clear()
+			auth_failed.emit("Logged out successfully")
+			return
 
 func _handle_auth_success(response_data: Dictionary) -> void:
 	print("[GodotBaaS] Handling auth success with data: ", response_data)

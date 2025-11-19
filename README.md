@@ -2,17 +2,17 @@
 
 Backend services for your Godot game without the headache.
 
-## 🎮 Test Game Available!
+## Test Game Available!
 
 Want to see all features in action? Check out the **comprehensive test game** in `examples/testproject/`:
 
-- ✅ Full authentication flow (device ID, email/password, account linking)
-- ✅ Cloud saves with auto-sync
-- ✅ Global and friend leaderboards
-- ✅ Complete friends system (search, add, accept, remove)
-- ✅ Achievements with progress tracking
-- ✅ Simple clicker game to test everything
-- ✅ Clean, well-documented code you can learn from
+-  Full authentication flow (device ID, email/password, account linking)
+-  Cloud saves with auto-sync
+-  Global and friend leaderboards
+-  Complete friends system (search, add, accept, remove)
+-  Achievements with progress tracking
+-  Simple clicker game to test everything
+-  Clean, well-documented code you can learn from
 
 **[→ Open Test Game README](examples/testproject/README.md)** | **[→ Quick Start Guide](examples/testproject/QUICK_START.md)**
 
