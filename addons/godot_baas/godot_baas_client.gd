@@ -833,9 +833,10 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	if request_id != -1:
 		_active_requests.erase(request_id)
 	
+	var endpoint = _current_request.get("endpoint", "")
 	_current_request.clear()
 	_retry_count = 0
-	_handle_success_response(response_code, response_data)
+	_handle_success_response(response_code, response_data, endpoint)
 	
 	_process_next_queued_request()
 
@@ -900,7 +901,7 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 			else:
 				error.emit("HTTP " + str(response_code) + ": " + error_message)
 
-func _handle_success_response(_response_code: int, response_data: Variant) -> void:
+func _handle_success_response(_response_code: int, response_data: Variant, endpoint: String = "") -> void:
 	if typeof(response_data) != TYPE_DICTIONARY:
 		error.emit("Invalid response format: Expected dictionary")
 		return
@@ -1024,6 +1025,15 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 	
 	if response_data.has("success") and response_data.has("data"):
 		var data = response_data["data"]
+		if endpoint.contains("/friends/search"):
+			print("[GodotBaaS] Found ", data.size(), " players")
+			players_found.emit(data)
+			return
+		
+		if endpoint.contains("/friends/block"):
+			print("[GodotBaaS] Loaded ", data.size(), " blocked players")
+			blocked_players_loaded.emit(data)
+			return
 		
 		if data.has("requesterId") and data.has("addresseeId") and data.has("status"):
 			if data["status"] == "PENDING":
@@ -1048,17 +1058,6 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 			sent_requests_loaded.emit(data)
 			return
 		
-		var endpoint = _current_request.get("endpoint", "")
-		if endpoint.contains("/friends/search"):
-			print("[GodotBaaS] Found ", data.size(), " players")
-			players_found.emit(data)
-			return
-		
-		if endpoint.contains("/friends/block") and endpoint.contains("GET"):
-			print("[GodotBaaS] Loaded ", data.size(), " blocked players")
-			blocked_players_loaded.emit(data)
-			return
-		
 		if data is Array and data.size() > 0 and data[0].has("username"):
 			print("[GodotBaaS] Found ", data.size(), " players")
 			players_found.emit(data)
@@ -1076,20 +1075,7 @@ func _handle_success_response(_response_code: int, response_data: Variant) -> vo
 				blocked_players_loaded.emit(data)
 				return
 		
-		if data is Array and data.size() == 0:
-			if endpoint.contains("/friends/search"):
-				print("[GodotBaaS] Found 0 players")
-				players_found.emit(data)
-				return
-			elif endpoint.contains("/friends/block"):
-				print("[GodotBaaS] Loaded 0 blocked players")
-				blocked_players_loaded.emit(data)
-				return
-			else:
-				print("[GodotBaaS] Loaded empty array - assuming friend requests")
-				pending_requests_loaded.emit(data)
-				sent_requests_loaded.emit(data)
-				return
+
 	
 	if response_data.has("success") and response_data.has("message"):
 		var message = response_data["message"]
