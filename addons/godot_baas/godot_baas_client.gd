@@ -148,18 +148,15 @@ func get_queue_size() -> int:
 
 func clear_queue() -> void:
 	_request_queue.clear()
-	print("[GodotBaaS] Request queue cleared")
 
 func cancel_request(request_id: int) -> bool:
 	if _active_requests.has(request_id):
 		_active_requests.erase(request_id)
-		print("[GodotBaaS] Request ", request_id, " cancelled")
 		return true
 	
 	for i in range(_request_queue.size()):
 		if _request_queue[i].get("id") == request_id:
 			_request_queue.remove_at(i)
-			print("[GodotBaaS] Queued request ", request_id, " cancelled")
 			return true
 	
 	return false
@@ -167,7 +164,6 @@ func cancel_request(request_id: int) -> bool:
 func cancel_all_requests() -> void:
 	_active_requests.clear()
 	_request_queue.clear()
-	print("[GodotBaaS] All requests cancelled")
 
 func _check_network_status() -> void:
 	var was_online = _is_online
@@ -176,10 +172,8 @@ func _check_network_status() -> void:
 				  _connection_state == ConnectionState.CONNECTING)
 	
 	if was_online and not _is_online:
-		print("[GodotBaaS] Network went offline")
 		network_offline.emit()
 	elif not was_online and _is_online:
-		print("[GodotBaaS] Network came online")
 		network_online.emit()
 		_process_queue()
 
@@ -188,7 +182,6 @@ func _process_queue() -> void:
 		return
 	
 	_processing_queue = true
-	print("[GodotBaaS] Processing ", _request_queue.size(), " queued requests")
 	
 	var successful = 0
 	var failed = 0
@@ -198,7 +191,6 @@ func _process_queue() -> void:
 	for queued_request in requests_to_process:
 		var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
 		if age > queue_timeout_seconds:
-			print("[GodotBaaS] Request expired (age: ", age, "s)")
 			failed += 1
 			continue
 		
@@ -216,7 +208,6 @@ func _process_queue() -> void:
 	
 	_processing_queue = false
 	queue_processed.emit(successful, failed)
-	print("[GodotBaaS] Queue processed: ", successful, " successful, ", failed, " failed")
 
 func _process_next_queued_request() -> void:
 	if _request_queue.is_empty() or not _current_request.is_empty():
@@ -226,11 +217,8 @@ func _process_next_queued_request() -> void:
 	
 	var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
 	if age > queue_timeout_seconds:
-		print("[GodotBaaS] Queued request expired (age: ", age, "s)")
 		_process_next_queued_request()
 		return
-	
-	print("[GodotBaaS] Processing queued request (ID: ", queued_request.get("id"), ")")
 	
 	_current_request = {
 		"id": queued_request.get("id"),
@@ -310,7 +298,6 @@ func login_player(email: String, password: String) -> void:
 
 func login_with_device_id() -> void:
 	var device_id = _get_or_create_device_id()
-	print("[GodotBaaS] Logging in with device ID: ", device_id.substr(0, 8), "...")
 	
 	var body = {
 		"deviceId": device_id
@@ -361,7 +348,7 @@ func logout() -> void:
 	
 	_make_request("POST", "/api/v1/game/auth/logout", {}, true, RequestPriority.HIGH)
 
-func save_data(key: String, value: Variant, version: int = 0) -> void:
+func save_data(key: String, value: Variant, version: int = -1) -> void:
 	if not _authenticated or player_token == "":
 		error.emit("Cannot save data: Not authenticated")
 		return
@@ -387,7 +374,27 @@ func delete_data(key: String) -> void:
 	
 	_make_request("DELETE", ENDPOINT_PLAYER_DATA + "/" + key, {}, true)
 
-func merge_data(key: String, value: Variant, version: int = 0, strategy: String = "merge") -> void:
+func resolve_conflict_with_server_data(key: String, server_version: int) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot resolve conflict: Not authenticated")
+		return
+	
+	load_data(key)
+
+func resolve_conflict_with_local_data(key: String, local_value: Variant, server_version: int) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot resolve conflict: Not authenticated")
+		return
+	
+	save_data(key, local_value, server_version)
+
+func resolve_conflict_with_merged_data(key: String, merged_value: Variant, server_version: int) -> void:
+	if not _authenticated or player_token == "":
+		error.emit("Cannot resolve conflict: Not authenticated")
+		return
+	save_data(key, merged_value, server_version)
+
+func merge_data(key: String, value: Variant, version: int = -1, strategy: String = "merge") -> void:
 	if not _authenticated or player_token == "":
 		error.emit("Cannot merge data: Not authenticated")
 		return
@@ -615,7 +622,6 @@ func _make_request(method: String, endpoint: String, body: Dictionary = {}, requ
 	if not _is_online and enable_offline_queue and priority != RequestPriority.CRITICAL:
 		# Queue the request
 		if _request_queue.size() >= max_queue_size:
-			print("[GodotBaaS] Queue full, dropping oldest request")
 			_request_queue.pop_front()
 		
 		var queued_request = {
@@ -638,13 +644,10 @@ func _make_request(method: String, endpoint: String, body: Dictionary = {}, requ
 		if not inserted:
 			_request_queue.append(queued_request)
 		
-		print("[GodotBaaS] Request queued (ID: ", request_id, ", Priority: ", priority, ", Queue size: ", _request_queue.size(), ")")
 		request_queued.emit(request_id)
 		return request_id
 	
 	if _http_client.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
-		# Queue this request to be executed after current one completes
-		print("[GodotBaaS] HTTPRequest busy, queueing request (ID: ", request_id, ")")
 		var queued_request = {
 			"id": request_id,
 			"method": method,
@@ -698,11 +701,6 @@ func _execute_request() -> void:
 		var timestamp = _get_timestamp()
 		var nonce = _generate_nonce()
 		var signature = _generate_signature(body_string, timestamp)
-		
-		print("[GodotBaaS] Signing request - Body: ", body_string)
-		print("[GodotBaaS] Timestamp: ", timestamp)
-		print("[GodotBaaS] Signature: ", signature.substr(0, 20), "...")
-		
 		headers.append("X-Signature: " + signature)
 		headers.append("X-Timestamp: " + timestamp)
 		headers.append("X-Nonce: " + nonce)
@@ -734,7 +732,6 @@ func _handle_request_failure(error_message: String) -> void:
 	if enable_retry and _retry_count < max_retries:
 		_retry_count += 1
 		var delay = retry_delay_ms * pow(2, _retry_count - 1)
-		print("[GodotBaaS] Request failed, retrying in ", delay, "ms (attempt ", _retry_count, "/", max_retries, ")")
 		_retry_timer.start(delay / 1000.0)
 	else:
 		if _retry_count >= max_retries:
@@ -746,14 +743,11 @@ func _handle_request_failure(error_message: String) -> void:
 
 func _on_retry_timeout() -> void:
 	if _current_request.is_empty() or not _current_request.has("method"):
-		print("[GodotBaaS] Retry cancelled - no active request")
 		return
 	
-	print("[GodotBaaS] Retrying request...")
 	_execute_request()
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	print("[GodotBaaS] Request completed - Result: ", result, ", Response code: ", response_code)
 	
 	if result != HTTPRequest.RESULT_SUCCESS:
 		_connection_state = ConnectionState.ERROR
@@ -804,25 +798,19 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	
 	var body_string = body.get_string_from_utf8()
-	print("[GodotBaaS] Response body: ", body_string)
 	
 	var json = JSON.new()
 	var parse_result = json.parse(body_string)
 	
 	if parse_result != OK:
-		print("[GodotBaaS] JSON parse error at line ", json.get_error_line(), ": ", json.get_error_message())
-		error.emit("Failed to parse response: Invalid JSON at line " + str(json.get_error_line()) + " - " + json.get_error_message())
+		error.emit("Failed to parse response: Invalid JSON")
 		return
 	
 	var response_data = json.data
-	print("[GodotBaaS] Parsed response data: ", response_data)
 	
 	if response_code >= 400:
-		print("[GodotBaaS] Error response - Code: ", response_code)
 		_handle_error_response(response_code, response_data)
 		return
-	
-	print("[GodotBaaS] Success response - Code: ", response_code)
 	_connection_state = ConnectionState.CONNECTED
 	_is_online = true
 	
@@ -847,11 +835,13 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 		if response_data.has("error"):
 			var error_obj = response_data["error"]
 			if typeof(error_obj) == TYPE_DICTIONARY and error_obj.has("message"):
-				error_message = error_obj["message"]
+				var msg = error_obj["message"]
+				error_message = str(msg) if typeof(msg) != TYPE_STRING else msg
 			elif typeof(error_obj) == TYPE_STRING:
 				error_message = error_obj
 		elif response_data.has("message"):
-			error_message = response_data["message"]
+			var msg = response_data["message"]
+			error_message = str(msg) if typeof(msg) != TYPE_STRING else msg
 	
 	match response_code:
 		401:
@@ -860,6 +850,12 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 			auth_failed.emit(error_message)
 		
 		409:
+			if typeof(response_data) == TYPE_DICTIONARY and response_data.has("error"):
+				var error_obj = response_data["error"]
+				if typeof(error_obj) == TYPE_DICTIONARY and error_obj.get("code") == "CONFLICT":
+					_handle_version_conflict()
+					return
+			
 			if typeof(response_data) == TYPE_DICTIONARY:
 				var key = response_data.get("key", "")
 				var current_version = response_data.get("currentVersion", 0)
@@ -875,31 +871,102 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 			error.emit("Rate limit exceeded: " + error_message)
 		
 		400:
-			if error_message.to_lower().contains("email") or error_message.to_lower().contains("password") or error_message.to_lower().contains("authentication"):
+			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
+			if msg_lower.contains("email") or msg_lower.contains("password") or msg_lower.contains("authentication"):
 				auth_failed.emit(error_message)
 			else:
-				error.emit("Bad request: " + error_message)
+				error.emit("Bad request: " + str(error_message))
 		
 		403:
-			if error_message.to_lower().contains("authentication") or error_message.to_lower().contains("credentials"):
+			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
+			if msg_lower.contains("authentication") or msg_lower.contains("credentials"):
 				auth_failed.emit(error_message)
 			else:
-				error.emit("Forbidden: " + error_message)
+				error.emit("Forbidden: " + str(error_message))
 		
 		404:
-			if error_message.to_lower().contains("achievement"):
+			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
+			if msg_lower.contains("achievement"):
 				achievement_unlock_failed.emit(error_message)
 			else:
-				error.emit("Not found: " + error_message)
+				error.emit("Not found: " + str(error_message))
 		
 		500, 502, 503, 504:
-			error.emit("Server error: " + error_message)
+			error.emit("Server error: " + str(error_message))
 		
 		_:
-			if error_message.to_lower().contains("achievement"):
+			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
+			if msg_lower.contains("achievement"):
 				achievement_unlock_failed.emit(error_message)
 			else:
-				error.emit("HTTP " + str(response_code) + ": " + error_message)
+				error.emit("HTTP " + str(response_code) + ": " + str(error_message))
+
+func _handle_version_conflict() -> void:
+	if not _current_request.has("endpoint") or not _current_request.has("body"):
+		error.emit("Version conflict: Cannot resolve - missing request data")
+		_current_request.clear()
+		_retry_count = 0
+		_process_next_queued_request()
+		return
+	
+	var endpoint = _current_request["endpoint"]
+	var body = _current_request["body"]
+	
+	var key_match = endpoint.split("/")
+	if key_match.size() == 0:
+		error.emit("Version conflict: Cannot extract key from endpoint")
+		_current_request.clear()
+		_retry_count = 0
+		_process_next_queued_request()
+		return
+	
+	var key = key_match[key_match.size() - 1]
+	var local_data = body.get("value", {})
+	
+	_current_request.clear()
+	_retry_count = 0
+	
+	var temp_http = HTTPRequest.new()
+	add_child(temp_http)
+	
+	var url = base_url + ENDPOINT_PLAYER_DATA + "/" + key
+	var headers: PackedStringArray = [
+		"Content-Type: application/json",
+		"X-API-Key: " + api_key,
+		"X-Player-Token: " + player_token
+	]
+	
+	temp_http.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray):
+		temp_http.queue_free()
+		
+		if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+			data_conflict.emit(key, 0, local_data)
+			_process_next_queued_request()
+			return
+		
+		var body_string = response_body.get_string_from_utf8()
+		var json = JSON.new()
+		if json.parse(body_string) != OK:
+			data_conflict.emit(key, 0, local_data)
+			_process_next_queued_request()
+			return
+		
+		var response_data = json.data
+		if typeof(response_data) == TYPE_DICTIONARY and response_data.has("data"):
+			var data = response_data["data"]
+			if typeof(data) == TYPE_DICTIONARY:
+				var server_version = data.get("version", 0)
+				var server_data = data.get("value", {})
+				
+				data_conflict.emit(key, server_version, server_data)
+				_process_next_queued_request()
+				return
+		
+		data_conflict.emit(key, 0, local_data)
+		_process_next_queued_request()
+	)
+	
+	temp_http.request(url, headers)
 
 func _handle_success_response(_response_code: int, response_data: Variant, endpoint: String = "") -> void:
 	if typeof(response_data) != TYPE_DICTIONARY:
@@ -926,14 +993,12 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 				if data.has("version") and typeof(value) == TYPE_DICTIONARY:
 					value["_version"] = data["version"]
 				
-				print("[GodotBaaS] Emitting data_loaded signal - Key: ", key, ", Value: ", value)
 				data_loaded.emit(key, value)
 				return
 			
 			if data.has("version") and data.has("key") and not data.has("value"):
 				var key = data["key"]
 				var version = data["version"]
-				print("[GodotBaaS] Emitting data_saved signal (nested) - Key: ", key, ", Version: ", version)
 				data_saved.emit(key, version)
 				return
 	
@@ -944,7 +1009,6 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 		if response_data.has("version") and typeof(value) == TYPE_DICTIONARY:
 			value["_version"] = response_data["version"]
 		
-		print("[GodotBaaS] Emitting data_loaded signal (root) - Key: ", key, ", Value: ", value)
 		data_loaded.emit(key, value)
 		return
 	
@@ -962,18 +1026,37 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 		score_submitted.emit(leaderboard_slug, rank)
 		return
 	
-	if response_data.has("entries") and response_data.has("leaderboard"):
+	# Check if leaderboard data is wrapped in a "data" field
+	if response_data.has("entries") and (response_data.has("leaderboardSlug") or response_data.has("leaderboard")):
 		var entries = response_data["entries"]
-		var leaderboard_info = response_data["leaderboard"]
-		var leaderboard_slug = ""
+		var leaderboard_slug = response_data.get("leaderboardSlug", "")
 		
-		if typeof(leaderboard_info) == TYPE_DICTIONARY:
-			leaderboard_slug = leaderboard_info.get("slug", "")
-		elif typeof(leaderboard_info) == TYPE_STRING:
-			leaderboard_slug = leaderboard_info
+		if leaderboard_slug == "" and response_data.has("leaderboard"):
+			var leaderboard_info = response_data["leaderboard"]
+			if typeof(leaderboard_info) == TYPE_DICTIONARY:
+				leaderboard_slug = leaderboard_info.get("slug", "")
+			elif typeof(leaderboard_info) == TYPE_STRING:
+				leaderboard_slug = leaderboard_info
 		
 		leaderboard_loaded.emit(leaderboard_slug, entries)
 		return
+	
+	if response_data.has("data"):
+		var data = response_data["data"]
+		if typeof(data) == TYPE_DICTIONARY:
+			if data.has("entries") and (data.has("leaderboardSlug") or data.has("leaderboard")):
+				var entries = data["entries"]
+				var leaderboard_slug = data.get("leaderboardSlug", "")
+				
+				if leaderboard_slug == "" and data.has("leaderboard"):
+					var leaderboard_info = data["leaderboard"]
+					if typeof(leaderboard_info) == TYPE_DICTIONARY:
+						leaderboard_slug = leaderboard_info.get("slug", "")
+					elif typeof(leaderboard_info) == TYPE_STRING:
+						leaderboard_slug = leaderboard_info
+				
+				leaderboard_loaded.emit(leaderboard_slug, entries)
+				return
 	
 	if response_data.has("rank") and response_data.has("score"):
 		var leaderboard_slug = response_data.get("leaderboardSlug", "")
@@ -983,9 +1066,9 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 	
 	if response_data.has("success") and response_data.has("player") and response_data.has("message"):
 		var message = response_data["message"]
-		if "username" in message.to_lower():
+		var msg_str = str(message) if typeof(message) != TYPE_STRING else message
+		if "username" in msg_str.to_lower():
 			var player = response_data["player"]
-			print("[GodotBaaS] Username updated: ", player.get("username", ""))
 			username_updated.emit(player)
 			return
 	
@@ -994,50 +1077,40 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 		var is_new_unlock = response_data["isNewUnlock"]
 		
 		if is_new_unlock:
-			print("[GodotBaaS] Achievement unlocked: ", achievement.get("name", "Unknown"))
 			achievement_unlocked.emit(achievement)
-		else:
-			print("[GodotBaaS] Achievement already unlocked: ", achievement.get("name", "Unknown"))
 		return
 	
 	if response_data.has("success") and response_data.has("achievement") and response_data.has("unlocked"):
 		var achievement = response_data["achievement"]
 		var unlocked = response_data["unlocked"]
 		
-		print("[GodotBaaS] Achievement progress updated: ", achievement.get("name", "Unknown"))
 		achievement_progress_updated.emit(achievement)
 		
 		if unlocked:
-			print("[GodotBaaS] Achievement unlocked through progress: ", achievement.get("name", "Unknown"))
 			achievement_unlocked.emit(achievement)
 		return
 	
 	if response_data.has("achievements") and response_data.has("stats"):
 		var achievements = response_data["achievements"]
-		print("[GodotBaaS] Loaded ", achievements.size(), " achievements")
 		achievements_loaded.emit(achievements)
 		return
 	
 	if response_data.has("id") and response_data.has("name") and response_data.has("description"):
-		print("[GodotBaaS] Loaded single achievement: ", response_data.get("name", "Unknown"))
 		achievements_loaded.emit([response_data])
 		return
 	
 	if response_data.has("success") and response_data.has("data"):
 		var data = response_data["data"]
 		if endpoint.contains("/friends/search"):
-			print("[GodotBaaS] Found ", data.size(), " players")
 			players_found.emit(data)
 			return
 		
 		if endpoint.contains("/friends/block"):
-			print("[GodotBaaS] Loaded ", data.size(), " blocked players")
 			blocked_players_loaded.emit(data)
 			return
 		
 		if data.has("requesterId") and data.has("addresseeId") and data.has("status"):
 			if data["status"] == "PENDING":
-				print("[GodotBaaS] Friend request sent")
 				friend_request_sent.emit(data)
 				return
 			elif data["status"] == "ACCEPTED":
@@ -1079,24 +1152,26 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 	
 	if response_data.has("success") and response_data.has("message"):
 		var message = response_data["message"]
+		var msg_str = str(message) if typeof(message) != TYPE_STRING else message
+		var msg_lower = msg_str.to_lower()
 		
-		if "removed" in message.to_lower():
+		if "removed" in msg_lower:
 			print("[GodotBaaS] Friend removed")
 			friend_removed.emit()
 			return
-		elif "declined" in message.to_lower():
+		elif "declined" in msg_lower:
 			print("[GodotBaaS] Friend request declined")
 			friend_request_declined.emit()
 			return
-		elif "cancelled" in message.to_lower():
+		elif "cancelled" in msg_lower:
 			print("[GodotBaaS] Friend request cancelled")
 			friend_request_cancelled.emit()
 			return
-		elif "blocked" in message.to_lower() and "un" not in message.to_lower():
+		elif "blocked" in msg_lower and "un" not in msg_lower:
 			print("[GodotBaaS] Player blocked")
 			player_blocked.emit()
 			return
-		elif "unblocked" in message.to_lower():
+		elif "unblocked" in msg_lower:
 			print("[GodotBaaS] Player unblocked")
 			player_unblocked.emit()
 			return
@@ -1111,7 +1186,8 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 	
 	if response_data.has("success") and response_data.has("message"):
 		var message = response_data["message"]
-		if "logged out" in message.to_lower():
+		var msg_str = str(message) if typeof(message) != TYPE_STRING else message
+		if "logged out" in msg_str.to_lower():
 			print("[GodotBaaS] Player logged out successfully")
 			_authenticated = false
 			player_token = ""
@@ -1196,3 +1272,221 @@ func _normalize_json_numbers(json_string: String) -> String:
 	var regex = RegEx.new()
 	regex.compile("(\\d+)\\.0(?!\\d)")
 	return regex.sub(json_string, "$1", true)
+
+# Messaging signals
+signal message_sent(message: Dictionary)
+signal message_received(message: Dictionary)
+signal conversation_loaded(conversation: Dictionary)
+signal conversations_loaded(conversations: Array)
+signal message_deleted()
+
+# Group signals
+signal group_created(group: Dictionary)
+signal group_loaded(group: Dictionary)
+signal groups_loaded(groups: Array)
+signal group_updated(group: Dictionary)
+signal group_deleted()
+signal group_left()
+signal player_invited(invitation: Dictionary)
+signal invitation_accepted()
+signal invitation_declined()
+signal pending_invitations_loaded(invitations: Array)
+signal member_removed()
+signal ownership_transferred()
+signal member_muted()
+signal member_unmuted()
+
+# Group messaging signals
+signal group_message_sent(message: Dictionary)
+signal group_message_received(message: Dictionary)
+signal group_messages_loaded(data: Dictionary)
+signal group_message_deleted()
+signal group_messages_marked_read()
+signal group_messages_searched(messages: Array)
+
+# Notification signals
+signal notification_received(notification: Dictionary)
+signal notifications_loaded(data: Dictionary)
+signal notification_marked_read()
+signal all_notifications_marked_read()
+signal notification_deleted()
+signal notification_preferences_loaded(preferences: Dictionary)
+signal notification_preferences_updated(preferences: Dictionary)
+signal notifications_muted()
+signal notifications_unmuted()
+
+# Messaging endpoints
+const ENDPOINT_MESSAGES_DIRECT = "/api/v1/game/messages/direct"
+const ENDPOINT_MESSAGES_CONVERSATIONS = "/api/v1/game/messages/conversations"
+const ENDPOINT_MESSAGES_BLOCK = "/api/v1/game/messages/block"
+const ENDPOINT_MESSAGES_BLOCKED = "/api/v1/game/messages/blocked"
+
+# Group endpoints
+const ENDPOINT_GROUPS = "/api/v1/game/groups"
+const ENDPOINT_GROUP_INVITATIONS_PENDING = "/api/v1/game/groups/invitations/pending"
+
+# Notification endpoints
+const ENDPOINT_NOTIFICATIONS = "/api/v1/game/notifications"
+const ENDPOINT_NOTIFICATIONS_PREFERENCES = "/api/v1/game/notifications/preferences"
+const ENDPOINT_NOTIFICATIONS_MUTE = "/api/v1/game/notifications/mute"
+const ENDPOINT_NOTIFICATIONS_UNMUTE = "/api/v1/game/notifications/unmute"
+const ENDPOINT_NOTIFICATIONS_READ_ALL = "/api/v1/game/notifications/read-all"
+
+# ============================================================================
+# MESSAGING METHODS
+# ============================================================================
+
+func send_message(recipient_id: String, content: String) -> void:
+	var body = {
+		"recipientId": recipient_id,
+		"content": content
+	}
+	_make_request("POST", ENDPOINT_MESSAGES_DIRECT, body, true)
+
+func get_conversations() -> void:
+	_make_request("GET", ENDPOINT_MESSAGES_CONVERSATIONS, {}, true)
+
+func get_conversation(conversation_id: String, limit: int = 50, offset: int = 0) -> void:
+	var url = ENDPOINT_MESSAGES_CONVERSATIONS + "/" + conversation_id + "?limit=" + str(limit) + "&offset=" + str(offset)
+	_make_request("GET", url, {}, true)
+
+func delete_message(message_id: String) -> void:
+	var url = "/api/v1/game/messages/" + message_id
+	_make_request("DELETE", url, {}, true)
+
+func mark_message_read(message_id: String) -> void:
+	var url = "/api/v1/game/messages/" + message_id + "/read"
+	_make_request("POST", url, {}, true)
+
+# ============================================================================
+# GROUP METHODS
+# ============================================================================
+
+func create_group(name: String, description: String = "", max_members: int = 0) -> void:
+	var body = {"name": name}
+	if description != "":
+		body["description"] = description
+	if max_members > 0:
+		body["maxMembers"] = max_members
+	_make_request("POST", ENDPOINT_GROUPS, body, true)
+
+func get_player_groups() -> void:
+	_make_request("GET", ENDPOINT_GROUPS, {}, true)
+
+func get_group(group_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id
+	_make_request("GET", url, {}, true)
+
+func update_group(group_id: String, name: String = "", description: String = "", max_members: int = 0) -> void:
+	var body = {}
+	if name != "":
+		body["name"] = name
+	if description != "":
+		body["description"] = description
+	if max_members > 0:
+		body["maxMembers"] = max_members
+	var url = ENDPOINT_GROUPS + "/" + group_id
+	_make_request("PATCH", url, body, true)
+
+func delete_group(group_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id
+	_make_request("DELETE", url, {}, true)
+
+func leave_group(group_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/leave"
+	_make_request("POST", url, {}, true)
+
+func invite_player(group_id: String, player_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/invite"
+	var body = {"playerId": player_id}
+	_make_request("POST", url, body, true)
+
+func accept_invitation(group_id: String, invitation_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/invitations/" + invitation_id + "/accept"
+	_make_request("POST", url, {}, true)
+
+func decline_invitation(group_id: String, invitation_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/invitations/" + invitation_id + "/decline"
+	_make_request("POST", url, {}, true)
+
+func get_pending_invitations() -> void:
+	_make_request("GET", ENDPOINT_GROUP_INVITATIONS_PENDING, {}, true)
+
+func remove_member(group_id: String, player_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/members/" + player_id
+	_make_request("DELETE", url, {}, true)
+
+func transfer_ownership(group_id: String, new_owner_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/transfer-ownership"
+	var body = {"newOwnerId": new_owner_id}
+	_make_request("POST", url, body, true)
+
+func mute_member(group_id: String, player_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/members/" + player_id + "/mute"
+	_make_request("POST", url, {}, true)
+
+func unmute_member(group_id: String, player_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/members/" + player_id + "/mute"
+	_make_request("DELETE", url, {}, true)
+
+# ============================================================================
+# GROUP MESSAGING METHODS
+# ============================================================================
+
+func send_group_message(group_id: String, content: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/messages"
+	var body = {"content": content}
+	_make_request("POST", url, body, true)
+
+func get_group_messages(group_id: String, limit: int = 100, offset: int = 0) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/messages?limit=" + str(limit) + "&offset=" + str(offset)
+	_make_request("GET", url, {}, true)
+
+func delete_group_message(group_id: String, message_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/messages/" + message_id
+	_make_request("DELETE", url, {}, true)
+
+func mark_group_messages_read(group_id: String) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/messages/read"
+	_make_request("POST", url, {}, true)
+
+func search_group_messages(group_id: String, query: String, limit: int = 50) -> void:
+	var url = ENDPOINT_GROUPS + "/" + group_id + "/messages/search?q=" + query.uri_encode() + "&limit=" + str(limit)
+	_make_request("GET", url, {}, true)
+
+# ============================================================================
+# NOTIFICATION METHODS
+# ============================================================================
+
+func get_notifications(limit: int = 20, offset: int = 0) -> void:
+	var url = ENDPOINT_NOTIFICATIONS + "?limit=" + str(limit) + "&offset=" + str(offset)
+	_make_request("GET", url, {}, true)
+
+func mark_notification_read(notification_id: String) -> void:
+	var url = ENDPOINT_NOTIFICATIONS + "/" + notification_id + "/read"
+	_make_request("POST", url, {}, true)
+
+func mark_all_notifications_read() -> void:
+	_make_request("POST", ENDPOINT_NOTIFICATIONS_READ_ALL, {}, true)
+
+func delete_notification(notification_id: String) -> void:
+	var url = ENDPOINT_NOTIFICATIONS + "/" + notification_id
+	_make_request("DELETE", url, {}, true)
+
+func get_notification_preferences() -> void:
+	_make_request("GET", ENDPOINT_NOTIFICATIONS_PREFERENCES, {}, true)
+
+func update_notification_preferences(direct_messages: bool = true, group_messages: bool = true, invitations: bool = true) -> void:
+	var body = {
+		"directMessagesEnabled": direct_messages,
+		"groupMessagesEnabled": group_messages,
+		"invitationsEnabled": invitations
+	}
+	_make_request("PATCH", ENDPOINT_NOTIFICATIONS_PREFERENCES, body, true)
+
+func mute_notifications(mute_until: String) -> void:
+	var body = {"muteUntil": mute_until}
+	_make_request("POST", ENDPOINT_NOTIFICATIONS_MUTE, body, true)
+
+func unmute_notifications() -> void:
+	_make_request("POST", ENDPOINT_NOTIFICATIONS_UNMUTE, {}, true)
