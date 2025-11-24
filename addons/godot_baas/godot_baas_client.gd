@@ -5,6 +5,13 @@ var api_key: String = ""
 var base_url: String = "https://api.godotbaas.com"
 var player_token: String = ""
 
+# Concurrency
+var max_concurrent_requests: int = 2
+
+# Write batching
+var coalesce_writes_enabled: bool = true
+var coalesce_window_ms: int = 150
+
 # Retry settings
 var max_retries: int = 3
 var retry_delay_ms: int = 1000
@@ -17,6 +24,8 @@ var queue_timeout_seconds: int = 300
 
 # Security
 var enable_request_signing: bool = true
+var use_v2_signatures: bool = false
+var project_signing_secret: String = ""
 
 # Endpoints
 const ENDPOINT_AUTH_REGISTER = "/api/v1/game/auth/register"
@@ -46,20 +55,50 @@ enum RequestPriority {
 	CRITICAL
 }
 
-# State
-var _http_client: HTTPRequest
+enum WriteType {
+	OVERWRITE,
+	INCREMENT,
+	APPEND,
+	ONE_SHOT
+}
+
+const WRITE_OPERATION_METADATA := {
+	"save_data": {
+		"coalescible": true,
+		"write_type": WriteType.OVERWRITE,
+		"merge_key_builder": "_merge_key_player_data",
+		"merge_value_field": "value",
+		"urgency": RequestPriority.NORMAL
+	},
+	"merge_data": {
+		"coalescible": true,
+		"write_type": WriteType.OVERWRITE,
+		"merge_key_builder": "_merge_key_player_data",
+		"merge_value_field": "value",
+		"strategy_field": "strategy",
+		"coalescible_strategies": ["merge", "increment", "decrement"],
+		"urgency": RequestPriority.NORMAL
+	},
+	"track_event": {
+		"coalescible": false,
+		"write_type": WriteType.ONE_SHOT,
+		"urgency": RequestPriority.LOW
+	}
+}
+
+var _http_clients: Array = []
+var _http_client_usage: Dictionary = {}
 var _authenticated: bool = false
 var _player_data: Dictionary = {}
 var _connection_state: ConnectionState = ConnectionState.DISCONNECTED
-var _current_request: Dictionary = {}
-var _retry_count: int = 0
-var _retry_timer: Timer
 var _request_queue: Array = []
 var _is_online: bool = true
 var _network_check_timer: Timer
-var _processing_queue: bool = false
 var _request_id_counter: int = 0
 var _active_requests: Dictionary = {}
+var _pending_writes: Dictionary = {}
+var _pending_write_flush_timer: Timer
+var _pending_retry_timers: Dictionary = {}
 
 # Auth signals
 signal authenticated(player_data: Dictionary)
@@ -106,16 +145,13 @@ signal friend_leaderboard_loaded(leaderboard_slug: String, entries: Array)
 signal error(error_message: String)
 
 func _ready() -> void:
-	_http_client = HTTPRequest.new()
-	add_child(_http_client)
-	_http_client.request_completed.connect(_on_request_completed)
-	_http_client.timeout = 30.0
+	_initialize_http_clients()
 	
-	_retry_timer = Timer.new()
-	add_child(_retry_timer)
-	_retry_timer.one_shot = true
-	_retry_timer.timeout.connect(_on_retry_timeout)
-	
+	_pending_write_flush_timer = Timer.new()
+	_pending_write_flush_timer.one_shot = true
+	add_child(_pending_write_flush_timer)
+	_pending_write_flush_timer.timeout.connect(_flush_pending_writes)
+
 	_network_check_timer = Timer.new()
 	add_child(_network_check_timer)
 	_network_check_timer.wait_time = 5.0
@@ -123,15 +159,529 @@ func _ready() -> void:
 	_network_check_timer.start()
 
 func _exit_tree() -> void:
-	if _http_client:
-		_http_client.queue_free()
-	if _retry_timer:
-		_retry_timer.queue_free()
+	_clear_http_clients()
 	if _network_check_timer:
 		_network_check_timer.queue_free()
+	if _pending_write_flush_timer:
+		_pending_write_flush_timer.queue_free()
+	for timer in _pending_retry_timers.values():
+		if timer:
+			timer.stop()
+			timer.queue_free()
+	_pending_retry_timers.clear()
 	
 	_request_queue.clear()
 	_active_requests.clear()
+	_pending_writes.clear()
+
+
+func _handle_write_operation(operation_name: String, method: String, endpoint: String, body: Dictionary, requires_auth: bool, default_priority: RequestPriority, context: Dictionary = {}) -> void:
+	var metadata: Variant = WRITE_OPERATION_METADATA.get(operation_name)
+	var priority: RequestPriority = default_priority
+	if typeof(metadata) == TYPE_DICTIONARY:
+		if metadata.has("urgency"):
+			priority = metadata["urgency"]
+	else:
+		_make_request(method, endpoint, body, requires_auth, priority)
+		return
+	
+	var is_coalescible: bool = metadata.get("coalescible", false)
+	var write_type: WriteType = metadata.get("write_type", WriteType.ONE_SHOT)
+	var merge_key: String = ""
+	if metadata.has("merge_key_builder"):
+		var builder_name: String = metadata["merge_key_builder"]
+		if has_method(builder_name):
+			merge_key = call(builder_name, context)
+	var can_queue_merge: bool = is_coalescible and merge_key != ""
+	if not coalesce_writes_enabled or not is_coalescible:
+		_make_request(method, endpoint, body, requires_auth, priority, can_queue_merge, merge_key, write_type)
+		return
+	
+	if metadata.has("strategy_field"):
+		var strategy_field: String = metadata["strategy_field"]
+		var strategy_value: Variant = context.get("strategy", body.get(strategy_field, ""))
+		var allowed_strategies: Array = metadata.get("coalescible_strategies", [])
+		if typeof(strategy_value) == TYPE_STRING and not allowed_strategies.has(strategy_value):
+			_make_request(method, endpoint, body, requires_auth, priority, can_queue_merge, merge_key, write_type)
+			return
+		elif typeof(strategy_value) != TYPE_STRING and not allowed_strategies.is_empty():
+			_make_request(method, endpoint, body, requires_auth, priority, can_queue_merge, merge_key, write_type)
+			return
+	
+	if merge_key == "":
+		_make_request(method, endpoint, body, requires_auth, priority, false, merge_key, write_type)
+		return
+	
+	var pending_entry = {
+		"method": method,
+		"endpoint": endpoint,
+		"data": body,
+		"requires_auth": requires_auth,
+		"priority": priority,
+		"write_type": metadata.get("write_type", WriteType.ONE_SHOT),
+		"timestamp": Time.get_unix_time_from_system(),
+		"context": context.duplicate(true),
+		"merge_key": merge_key
+	}
+	_queue_pending_write(merge_key, pending_entry)
+
+
+func _queue_pending_write(merge_key: String, entry: Dictionary) -> void:
+	if _pending_writes.has(merge_key):
+		var merged = _merge_pending_write(_pending_writes[merge_key], entry)
+		_pending_writes[merge_key] = merged
+	else:
+		_pending_writes[merge_key] = entry
+	_schedule_pending_write_flush()
+
+
+func _merge_pending_write(existing: Dictionary, incoming: Dictionary) -> Dictionary:
+	var write_type: WriteType = incoming.get("write_type", WriteType.ONE_SHOT)
+	existing["write_type"] = write_type
+	match write_type:
+		WriteType.OVERWRITE:
+			existing["data"] = incoming.get("data", {})
+		WriteType.INCREMENT:
+			existing["data"] = _merge_increment_payload(existing.get("data", {}), incoming.get("data", {}))
+		WriteType.APPEND:
+			existing["data"] = _merge_append_payload(existing.get("data", []), incoming.get("data", []))
+		_:
+			existing["data"] = incoming.get("data", {})
+	
+	existing["timestamp"] = incoming.get("timestamp", Time.get_unix_time_from_system())
+	existing["context"] = incoming.get("context", {})
+	existing["method"] = incoming.get("method", existing.get("method", ""))
+	existing["endpoint"] = incoming.get("endpoint", existing.get("endpoint", ""))
+	existing["requires_auth"] = incoming.get("requires_auth", existing.get("requires_auth", false))
+	var existing_priority: RequestPriority = existing.get("priority", RequestPriority.NORMAL)
+	var incoming_priority: RequestPriority = incoming.get("priority", RequestPriority.NORMAL)
+	existing["priority"] = existing_priority if existing_priority > incoming_priority else incoming_priority
+	return existing
+
+
+func _merge_increment_payload(original: Variant, incoming: Variant) -> Dictionary:
+	var base: Dictionary = {}
+	if typeof(original) == TYPE_DICTIONARY:
+		base = original.duplicate(true)
+	var additions: Dictionary = {}
+	if typeof(incoming) == TYPE_DICTIONARY:
+		additions = incoming
+	for key in additions.keys():
+		var delta = additions[key]
+		if typeof(delta) == TYPE_INT or typeof(delta) == TYPE_FLOAT:
+			var current_value = base.get(key, 0)
+			if typeof(current_value) == TYPE_INT or typeof(current_value) == TYPE_FLOAT:
+				base[key] = current_value + delta
+			else:
+				base[key] = delta
+		else:
+			base[key] = delta
+	return base
+
+
+func _merge_append_payload(original: Variant, incoming: Variant) -> Array:
+	var base_array: Array = []
+	if typeof(original) == TYPE_ARRAY:
+		base_array = original.duplicate(true)
+	if typeof(incoming) == TYPE_ARRAY:
+		for item in incoming:
+			base_array.append(item)
+	return base_array
+
+
+func _schedule_pending_write_flush() -> void:
+	if not _pending_write_flush_timer:
+		return
+	if _pending_writes.is_empty():
+		if _pending_write_flush_timer.time_left > 0:
+			_pending_write_flush_timer.stop()
+		return
+	var wait_time_ms = max(coalesce_window_ms, 1)
+	_pending_write_flush_timer.start(wait_time_ms / 1000.0)
+
+
+func _flush_pending_writes() -> void:
+	if _pending_writes.is_empty():
+		return
+	var writes_to_flush = _pending_writes.duplicate(true)
+	_pending_writes.clear()
+	for merge_key in writes_to_flush.keys():
+		var entry: Dictionary = writes_to_flush[merge_key]
+		var method: String = entry.get("method", "POST")
+		var endpoint: String = entry.get("endpoint", "")
+		var body: Dictionary = entry.get("data", {})
+		var requires_auth: bool = entry.get("requires_auth", false)
+		var priority: RequestPriority = entry.get("priority", RequestPriority.NORMAL)
+		if endpoint == "":
+			continue
+		_make_request(method, endpoint, body, requires_auth, priority)
+
+
+func _merge_key_player_data(context: Dictionary) -> String:
+	var key = str(context.get("key", ""))
+	return "player_data:" + key
+
+
+func _initialize_http_clients() -> void:
+	_clear_http_clients()
+	var pool_size = max(1, max_concurrent_requests)
+	for i in range(pool_size):
+		var client = HTTPRequest.new()
+		add_child(client)
+		client.timeout = 30.0
+		var callable = Callable(self, "_on_http_request_completed").bind(client)
+		client.set_meta("_baas_completion_callable", callable)
+		client.request_completed.connect(callable)
+		_http_clients.append(client)
+		_http_client_usage[client.get_instance_id()] = {
+			"busy": false,
+			"request_id": -1
+		}
+
+
+func _clear_http_clients() -> void:
+	for client in _http_clients:
+		if client:
+			var callable = client.get_meta("_baas_completion_callable", null)
+			if callable and client.request_completed.is_connected(callable):
+				client.request_completed.disconnect(callable)
+			client.queue_free()
+	_http_clients.clear()
+	_http_client_usage.clear()
+
+
+func _get_idle_http_client() -> HTTPRequest:
+	for client in _http_clients:
+		if client and not _http_client_usage.get(client.get_instance_id(), {}).get("busy", false):
+			return client
+	return null
+
+
+func _mark_client_busy(client: HTTPRequest, request_id: int) -> void:
+	if not client:
+		return
+	var client_id = client.get_instance_id()
+	var usage = _http_client_usage.get(client_id, {})
+	usage["busy"] = true
+	usage["request_id"] = request_id
+	_http_client_usage[client_id] = usage
+
+
+func _mark_client_idle(client: HTTPRequest) -> void:
+	if not client:
+		return
+	var client_id = client.get_instance_id()
+	var usage = _http_client_usage.get(client_id, {})
+	usage["busy"] = false
+	usage["request_id"] = -1
+	_http_client_usage[client_id] = usage
+
+
+func _try_dispatch_request(request: Dictionary) -> bool:
+	if not _is_online:
+		return false
+	var client = _get_idle_http_client()
+	if client == null:
+		return false
+	_active_requests[request.get("id")] = request
+	_execute_request_with_client(client, request)
+	return true
+
+
+func _execute_request_with_client(client: HTTPRequest, request: Dictionary) -> void:
+	if not client:
+		return
+	var method = request.get("method", "GET")
+	var endpoint = request.get("endpoint", "")
+	var body = request.get("body", {})
+	var requires_auth = request.get("requires_auth", false)
+	request["client"] = client
+	request["client_id"] = client.get_instance_id()
+	if not request.has("retries"):
+		request["retries"] = 0
+	_mark_client_busy(client, request.get("id", -1))
+	_connection_state = ConnectionState.CONNECTING
+	
+	var url = base_url + endpoint
+	var body_string = "{}"
+	if body.size() > 0:
+		body_string = JSON.stringify(body)
+		body_string = _normalize_json_numbers(body_string)
+	
+	var headers: PackedStringArray = [
+		"Content-Type: application/json",
+		"X-API-Key: " + api_key
+	]
+	
+	if enable_request_signing:
+		var timestamp = _get_timestamp()
+		var nonce = _generate_nonce()
+		if use_v2_signatures and project_signing_secret != "":
+			var signature = _generate_signature_v2(body_string, timestamp)
+			headers.append("X-Signature-V2: " + signature)
+			headers.append("X-Timestamp-V2: " + timestamp)
+		else:
+			var signature = _generate_signature(body_string, timestamp)
+			headers.append("X-Signature: " + signature)
+			headers.append("X-Timestamp: " + timestamp)
+		headers.append("X-Nonce: " + nonce)
+	
+	if requires_auth and player_token != "":
+		headers.append("X-Player-Token: " + player_token)
+	
+	var http_method = HTTPClient.METHOD_GET
+	match method.to_upper():
+		"GET":
+			http_method = HTTPClient.METHOD_GET
+		"POST":
+			http_method = HTTPClient.METHOD_POST
+		"PUT":
+			http_method = HTTPClient.METHOD_PUT
+		"DELETE":
+			http_method = HTTPClient.METHOD_DELETE
+		"PATCH":
+			http_method = HTTPClient.METHOD_PATCH
+	
+	var request_error = client.request(url, headers, http_method, body_string)
+	if request_error != OK:
+		_connection_state = ConnectionState.ERROR
+		_handle_request_failure(request.get("id", -1), "Network error: Failed to initiate request (Error code: " + str(request_error) + ")", true)
+		return
+
+
+func _on_http_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, client: HTTPRequest) -> void:
+	var client_id = client.get_instance_id()
+	var usage = _http_client_usage.get(client_id, {})
+	var request_id = usage.get("request_id", -1)
+	if request_id == -1:
+		_mark_client_idle(client)
+		return
+	var request: Dictionary = _active_requests.get(request_id, {})
+	if request.is_empty():
+		_mark_client_idle(client)
+		return
+	
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_connection_state = ConnectionState.ERROR
+		var error_message = _map_http_error(result)
+		var retryable = _is_retryable_error(result)
+		_handle_request_failure(request_id, error_message, retryable)
+		return
+	
+	var body_string = body.get_string_from_utf8()
+	var json = JSON.new()
+	if json.parse(body_string) != OK:
+		error.emit("Failed to parse response: Invalid JSON")
+		_finalize_request(request_id)
+		_try_process_queue()
+		return
+	var response_data = json.data
+	if response_code >= 400:
+		_handle_error_response(request, response_code, response_data)
+		_finalize_request(request_id)
+		_try_process_queue()
+		return
+	_connection_state = ConnectionState.CONNECTED
+	_is_online = true
+	_handle_success_response(response_code, response_data, request)
+	_finalize_request(request_id)
+	_try_process_queue()
+
+
+func _map_http_error(result: int) -> String:
+	match result:
+		HTTPRequest.RESULT_CHUNKED_BODY_SIZE_MISMATCH:
+			return "Network error: Chunked body size mismatch"
+		HTTPRequest.RESULT_CANT_CONNECT:
+			return "Network error: Cannot connect to server"
+		HTTPRequest.RESULT_CANT_RESOLVE:
+			return "Network error: Cannot resolve hostname"
+		HTTPRequest.RESULT_CONNECTION_ERROR:
+			return "Network error: Connection error"
+		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
+			return "Network error: TLS handshake error"
+		HTTPRequest.RESULT_NO_RESPONSE:
+			return "Network error: No response from server"
+		HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED:
+			return "Network error: Response body size limit exceeded"
+		HTTPRequest.RESULT_REQUEST_FAILED:
+			return "Network error: Request failed"
+		HTTPRequest.RESULT_DOWNLOAD_FILE_CANT_OPEN:
+			return "Network error: Cannot open download file"
+		HTTPRequest.RESULT_DOWNLOAD_FILE_WRITE_ERROR:
+			return "Network error: Download file write error"
+		HTTPRequest.RESULT_REDIRECT_LIMIT_REACHED:
+			return "Network error: Redirect limit reached"
+		HTTPRequest.RESULT_TIMEOUT:
+			return "Network error: Request timeout"
+		_:
+			return "Network error: Unknown error (code: " + str(result) + ")"
+
+
+func _is_retryable_error(result: int) -> bool:
+	return result in [
+		HTTPRequest.RESULT_CANT_CONNECT,
+		HTTPRequest.RESULT_CANT_RESOLVE,
+		HTTPRequest.RESULT_CONNECTION_ERROR,
+		HTTPRequest.RESULT_NO_RESPONSE,
+		HTTPRequest.RESULT_REQUEST_FAILED,
+		HTTPRequest.RESULT_TIMEOUT
+	]
+
+
+func _finalize_request(request_id: int) -> void:
+	var request: Dictionary = _active_requests.get(request_id, {})
+	if request.is_empty():
+		return
+	if request.has("client"):
+		_mark_client_idle(request["client"])
+	_active_requests.erase(request_id)
+	if _pending_retry_timers.has(request_id):
+		var timer = _pending_retry_timers[request_id]
+		if timer:
+			timer.stop()
+			timer.queue_free()
+		_pending_retry_timers.erase(request_id)
+
+
+func _schedule_retry(request: Dictionary, delay_ms: int) -> void:
+	var request_id = request.get("id", -1)
+	if request_id == -1:
+		return
+	var timer = Timer.new()
+	timer.one_shot = true
+	add_child(timer)
+	_pending_retry_timers[request_id] = timer
+	var request_copy = request.duplicate(true)
+	timer.timeout.connect(func():
+		_pending_retry_timers.erase(request_id)
+		if timer:
+			timer.queue_free()
+		request_copy["timestamp"] = Time.get_unix_time_from_system()
+		if not _try_dispatch_request(request_copy):
+			_enqueue_or_merge_request(request_copy, true)
+	)
+	timer.start(delay_ms / 1000.0)
+
+
+func _try_process_queue() -> void:
+	if not _is_online:
+		return
+	var dispatched = 0
+	var expired = 0
+	while not _request_queue.is_empty():
+		var client = _get_idle_http_client()
+		if client == null:
+			break
+		var queued_request = _request_queue.pop_front()
+		var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
+		if age > queue_timeout_seconds:
+			expired += 1
+			continue
+		_active_requests[queued_request.get("id")] = queued_request
+		_execute_request_with_client(client, queued_request)
+		dispatched += 1
+	if dispatched > 0 or expired > 0:
+		queue_processed.emit(dispatched, expired)
+
+
+func _handle_request_failure(request_id: int, error_message: String, retryable: bool) -> void:
+	var request: Dictionary = _active_requests.get(request_id, {})
+	if request.is_empty():
+		return
+	var can_retry = enable_retry and retryable
+	var retries = request.get("retries", 0)
+	if can_retry and retries < max_retries:
+		var updated_request = request.duplicate(true)
+		updated_request["retries"] = retries + 1
+		_finalize_request(request_id)
+		var delay = retry_delay_ms * pow(2, retries)
+		_schedule_retry(updated_request, delay)
+		return
+	_finalize_request(request_id)
+	var message = error_message
+	if retries >= max_retries and can_retry:
+		message += " (Max retries reached)"
+	error.emit(message)
+
+func _enqueue_or_merge_request(request: Dictionary, prioritize: bool = false) -> int:
+	if request.get("coalescible", false) and request.get("merge_key", "") != "":
+		var merge_index = _find_queue_merge_index(request.get("merge_key", ""), request.get("write_type", WriteType.ONE_SHOT))
+		if merge_index != -1:
+			var merged_entry = _merge_queue_requests(_request_queue[merge_index], request)
+			_request_queue[merge_index] = merged_entry
+			request_queued.emit(request.get("id", -1))
+			return request.get("id", -1)
+	
+	if prioritize:
+		_insert_request_sorted(request)
+	else:
+		_request_queue.append(request)
+	
+	_apply_queue_overflow_policy(request)
+	request_queued.emit(request.get("id", -1))
+	return request.get("id", -1)
+
+
+func _insert_request_sorted(request: Dictionary) -> void:
+	var inserted = false
+	for i in range(_request_queue.size()):
+		if _request_queue[i].get("priority", RequestPriority.NORMAL) < request.get("priority", RequestPriority.NORMAL):
+			_request_queue.insert(i, request)
+			inserted = true
+			break
+	if not inserted:
+		_request_queue.append(request)
+
+
+func _find_queue_merge_index(merge_key: String, write_type: WriteType) -> int:
+	for i in range(_request_queue.size()):
+		var entry: Dictionary = _request_queue[i]
+		if entry.get("merge_key", "") == merge_key and entry.get("write_type", write_type) == write_type:
+			return i
+	return -1
+
+
+func _merge_queue_requests(existing: Dictionary, incoming: Dictionary) -> Dictionary:
+	var write_type: WriteType = incoming.get("write_type", WriteType.ONE_SHOT)
+	existing["write_type"] = write_type
+	match write_type:
+		WriteType.OVERWRITE:
+			existing["body"] = incoming.get("body", {})
+		WriteType.INCREMENT:
+			existing["body"] = _merge_increment_payload(existing.get("body", {}), incoming.get("body", {}))
+		WriteType.APPEND:
+			existing["body"] = _merge_append_payload(existing.get("body", []), incoming.get("body", []))
+		_:
+			existing["body"] = incoming.get("body", {})
+
+	existing["timestamp"] = incoming.get("timestamp", Time.get_unix_time_from_system())
+	var existing_priority: RequestPriority = existing.get("priority", RequestPriority.NORMAL)
+	var incoming_priority: RequestPriority = incoming.get("priority", RequestPriority.NORMAL)
+	existing["priority"] = existing_priority if existing_priority > incoming_priority else incoming_priority
+	return existing
+
+
+func _apply_queue_overflow_policy(latest_request: Dictionary) -> void:
+	if _request_queue.size() <= max_queue_size:
+		return
+	var indices_to_consider: Array = []
+	for i in range(_request_queue.size()):
+		var entry: Dictionary = _request_queue[i]
+		if entry.get("priority", RequestPriority.NORMAL) == RequestPriority.CRITICAL:
+			continue
+		indices_to_consider.append(i)
+	if indices_to_consider.is_empty():
+		_request_queue.pop_front()
+		return
+	var merge_key = latest_request.get("merge_key", "")
+	for idx in indices_to_consider:
+		var entry: Dictionary = _request_queue[idx]
+		if merge_key != "" and entry.get("merge_key", "") == merge_key:
+			_request_queue.remove_at(idx)
+			return
+	var oldest_index = indices_to_consider[0]
+	_request_queue.remove_at(oldest_index)
 
 
 func get_connection_state() -> ConnectionState:
@@ -165,6 +715,55 @@ func cancel_all_requests() -> void:
 	_active_requests.clear()
 	_request_queue.clear()
 
+# V2 Signature Configuration Methods
+func configure_v2_signatures(signing_secret: String) -> void:
+	project_signing_secret = signing_secret
+	use_v2_signatures = true
+	print("[BaaS] V2 signatures enabled")
+
+func disable_v2_signatures() -> void:
+	use_v2_signatures = false
+	project_signing_secret = ""
+	print("[BaaS] V2 signatures disabled, using legacy V1")
+
+func is_using_v2_signatures() -> bool:
+	return use_v2_signatures and project_signing_secret != ""
+
+func get_signature_version() -> String:
+	if not enable_request_signing:
+		return "none"
+	elif is_using_v2_signatures():
+		return "v2"
+	else:
+		return "v1"
+
+func auto_upgrade_to_v2_if_needed(project_id: String) -> void:
+	if is_using_v2_signatures():
+		return  # Already using V2
+
+
+func validate_v2_configuration() -> Dictionary:
+	var result = {
+		"valid": true,
+		"issues": [],
+		"recommendations": []
+	}
+	
+	if use_v2_signatures and project_signing_secret == "":
+		result.valid = false
+		result.issues.append("V2 signatures enabled but no signing secret provided")
+		result.recommendations.append("Call configure_v2_signatures(secret) with a valid signing secret")
+	elif not use_v2_signatures and project_signing_secret != "":
+		result.issues.append("Signing secret provided but V2 signatures not enabled")
+		result.recommendations.append("Call configure_v2_signatures(secret) to enable V2")
+	
+	if enable_request_signing and api_key == "":
+		result.valid = false
+		result.issues.append("Request signing enabled but no API key provided")
+		result.recommendations.append("Set api_key to your project's API key")
+	
+	return result
+
 func _check_network_status() -> void:
 	var was_online = _is_online
 	
@@ -175,61 +774,7 @@ func _check_network_status() -> void:
 		network_offline.emit()
 	elif not was_online and _is_online:
 		network_online.emit()
-		_process_queue()
-
-func _process_queue() -> void:
-	if _processing_queue or _request_queue.is_empty():
-		return
-	
-	_processing_queue = true
-	
-	var successful = 0
-	var failed = 0
-	var requests_to_process = _request_queue.duplicate()
-	_request_queue.clear()
-	
-	for queued_request in requests_to_process:
-		var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
-		if age > queue_timeout_seconds:
-			failed += 1
-			continue
-		
-		_current_request = {
-			"method": queued_request.get("method"),
-			"endpoint": queued_request.get("endpoint"),
-			"body": queued_request.get("body"),
-			"requires_auth": queued_request.get("requires_auth")
-		}
-		_retry_count = 0
-		_execute_request()
-		successful += 1
-		
-		await get_tree().create_timer(0.1).timeout
-	
-	_processing_queue = false
-	queue_processed.emit(successful, failed)
-
-func _process_next_queued_request() -> void:
-	if _request_queue.is_empty() or not _current_request.is_empty():
-		return
-	
-	var queued_request = _request_queue.pop_front()
-	
-	var age = Time.get_unix_time_from_system() - queued_request.get("timestamp", 0)
-	if age > queue_timeout_seconds:
-		_process_next_queued_request()
-		return
-	
-	_current_request = {
-		"id": queued_request.get("id"),
-		"method": queued_request.get("method"),
-		"endpoint": queued_request.get("endpoint"),
-		"body": queued_request.get("body"),
-		"requires_auth": queued_request.get("requires_auth"),
-		"priority": queued_request.get("priority")
-	}
-	_retry_count = 0
-	_execute_request()
+		_try_process_queue()
 
 func _generate_nonce() -> String:
 	var crypto = Crypto.new()
@@ -241,6 +786,44 @@ func _generate_signature(body_string: String, timestamp: String) -> String:
 	var ctx = HashingContext.new()
 	
 	var key = api_key.to_utf8_buffer()
+	var key_bytes = PackedByteArray()
+	
+	if key.size() > 64:
+		ctx.start(HashingContext.HASH_SHA256)
+		ctx.update(key)
+		key_bytes = ctx.finish()
+		key_bytes.resize(64)
+	else:
+		key_bytes = key.duplicate()
+		key_bytes.resize(64)
+	
+	var ipad = PackedByteArray()
+	ipad.resize(64)
+	for i in range(64):
+		ipad[i] = key_bytes[i] ^ 0x36
+	
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(ipad)
+	ctx.update(data.to_utf8_buffer())
+	var inner_hash = ctx.finish()
+	
+	var opad = PackedByteArray()
+	opad.resize(64)
+	for i in range(64):
+		opad[i] = key_bytes[i] ^ 0x5c
+	
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(opad)
+	ctx.update(inner_hash)
+	var final_hash = ctx.finish()
+	
+	return final_hash.hex_encode()
+
+func _generate_signature_v2(body_string: String, timestamp: String) -> String:
+	var data = body_string + timestamp
+	var ctx = HashingContext.new()
+	
+	var key = project_signing_secret.to_utf8_buffer()
 	var key_bytes = PackedByteArray()
 	
 	if key.size() > 64:
@@ -357,8 +940,11 @@ func save_data(key: String, value: Variant, version: int = -1) -> void:
 		"value": value,
 		"version": version
 	}
-	
-	_make_request("POST", ENDPOINT_PLAYER_DATA + "/" + key, body, true)
+	var endpoint = ENDPOINT_PLAYER_DATA + "/" + key
+	var context = {
+		"key": key
+	}
+	_handle_write_operation("save_data", "POST", endpoint, body, true, RequestPriority.NORMAL, context)
 
 func load_data(key: String) -> void:
 	if not _authenticated or player_token == "":
@@ -404,8 +990,12 @@ func merge_data(key: String, value: Variant, version: int = -1, strategy: String
 		"version": version,
 		"strategy": strategy
 	}
-	
-	_make_request("PATCH", ENDPOINT_PLAYER_DATA + "/" + key, body, true)
+	var endpoint = ENDPOINT_PLAYER_DATA + "/" + key
+	var context = {
+		"key": key,
+		"strategy": strategy
+	}
+	_handle_write_operation("merge_data", "PATCH", endpoint, body, true, RequestPriority.NORMAL, context)
 
 func add_to_inventory(key: String, items: Array, version: int = 0) -> void:
 	merge_data(key, {"items": items}, version, "append")
@@ -615,220 +1205,34 @@ func get_friend_leaderboard(leaderboard_slug: String, limit: int = 100) -> void:
 	
 	_make_request("GET", ENDPOINT_FRIEND_LEADERBOARD + "/" + leaderboard_slug + "?limit=" + str(limit), {}, true)
 
-func _make_request(method: String, endpoint: String, body: Dictionary = {}, requires_auth: bool = false, priority: RequestPriority = RequestPriority.NORMAL) -> int:
+func _make_request(method: String, endpoint: String, body: Dictionary = {}, requires_auth: bool = false, priority: RequestPriority = RequestPriority.NORMAL, can_queue_merge: bool = false, merge_key: String = "", write_type: WriteType = WriteType.ONE_SHOT) -> int:
 	_request_id_counter += 1
 	var request_id = _request_id_counter
 	
-	if not _is_online and enable_offline_queue and priority != RequestPriority.CRITICAL:
-		# Queue the request
-		if _request_queue.size() >= max_queue_size:
-			_request_queue.pop_front()
-		
-		var queued_request = {
-			"id": request_id,
-			"method": method,
-			"endpoint": endpoint,
-			"body": body,
-			"requires_auth": requires_auth,
-			"priority": priority,
-			"timestamp": Time.get_unix_time_from_system()
-		}
-		
-		var inserted = false
-		for i in range(_request_queue.size()):
-			if _request_queue[i].get("priority", RequestPriority.NORMAL) < priority:
-				_request_queue.insert(i, queued_request)
-				inserted = true
-				break
-		
-		if not inserted:
-			_request_queue.append(queued_request)
-		
-		request_queued.emit(request_id)
-		return request_id
-	
-	if _http_client.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
-		var queued_request = {
-			"id": request_id,
-			"method": method,
-			"endpoint": endpoint,
-			"body": body,
-			"requires_auth": requires_auth,
-			"priority": priority,
-			"timestamp": Time.get_unix_time_from_system()
-		}
-		_request_queue.append(queued_request)
-		request_queued.emit(request_id)
-		return request_id
-	
-	_current_request = {
+	var request = {
 		"id": request_id,
 		"method": method,
 		"endpoint": endpoint,
 		"body": body,
 		"requires_auth": requires_auth,
-		"priority": priority
+		"priority": priority,
+		"timestamp": Time.get_unix_time_from_system(),
+		"merge_key": merge_key,
+		"write_type": write_type,
+		"coalescible": can_queue_merge,
+		"retries": 0
 	}
 	
-	_active_requests[request_id] = _current_request
-	_retry_count = 0
-	_execute_request()
+	if not _is_online and enable_offline_queue and priority != RequestPriority.CRITICAL:
+		return _enqueue_or_merge_request(request, true)
 	
+	if _try_dispatch_request(request):
+		return request_id
+	
+	_enqueue_or_merge_request(request, true)
 	return request_id
 
-func _execute_request() -> void:
-	var method = _current_request["method"]
-	var endpoint = _current_request["endpoint"]
-	var body = _current_request["body"]
-	var requires_auth = _current_request["requires_auth"]
-	
-	_connection_state = ConnectionState.CONNECTING
-	
-	var url = base_url + endpoint
-	var body_string = ""
-	if body.size() > 0:
-		body_string = JSON.stringify(body)
-		body_string = _normalize_json_numbers(body_string)
-	else:
-		body_string = "{}"
-	
-	var headers: PackedStringArray = [
-		"Content-Type: application/json",
-		"X-API-Key: " + api_key
-	]
-	
-	if enable_request_signing:
-		var timestamp = _get_timestamp()
-		var nonce = _generate_nonce()
-		var signature = _generate_signature(body_string, timestamp)
-		headers.append("X-Signature: " + signature)
-		headers.append("X-Timestamp: " + timestamp)
-		headers.append("X-Nonce: " + nonce)
-	
-	if requires_auth and player_token != "":
-		headers.append("X-Player-Token: " + player_token)
-	
-	var http_method = HTTPClient.METHOD_GET
-	match method.to_upper():
-		"GET":
-			http_method = HTTPClient.METHOD_GET
-		"POST":
-			http_method = HTTPClient.METHOD_POST
-		"PUT":
-			http_method = HTTPClient.METHOD_PUT
-		"DELETE":
-			http_method = HTTPClient.METHOD_DELETE
-		"PATCH":
-			http_method = HTTPClient.METHOD_PATCH
-	
-	var request_error = _http_client.request(url, headers, http_method, body_string)
-	
-	if request_error != OK:
-		_connection_state = ConnectionState.ERROR
-		_handle_request_failure("Network error: Failed to initiate request (Error code: " + str(request_error) + ")")
-		return
-
-func _handle_request_failure(error_message: String) -> void:
-	if enable_retry and _retry_count < max_retries:
-		_retry_count += 1
-		var delay = retry_delay_ms * pow(2, _retry_count - 1)
-		_retry_timer.start(delay / 1000.0)
-	else:
-		if _retry_count >= max_retries:
-			error.emit(error_message + " (Max retries reached)")
-		else:
-			error.emit(error_message)
-		_current_request.clear()
-		_retry_count = 0
-
-func _on_retry_timeout() -> void:
-	if _current_request.is_empty() or not _current_request.has("method"):
-		return
-	
-	_execute_request()
-
-func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	
-	if result != HTTPRequest.RESULT_SUCCESS:
-		_connection_state = ConnectionState.ERROR
-		var error_message = "Network error: "
-		var should_retry = false
-		
-		match result:
-			HTTPRequest.RESULT_CHUNKED_BODY_SIZE_MISMATCH:
-				error_message += "Chunked body size mismatch"
-			HTTPRequest.RESULT_CANT_CONNECT:
-				error_message += "Cannot connect to server"
-				should_retry = true
-			HTTPRequest.RESULT_CANT_RESOLVE:
-				error_message += "Cannot resolve hostname"
-				should_retry = true
-			HTTPRequest.RESULT_CONNECTION_ERROR:
-				error_message += "Connection error"
-				should_retry = true
-			HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
-				error_message += "TLS handshake error"
-			HTTPRequest.RESULT_NO_RESPONSE:
-				error_message += "No response from server"
-				should_retry = true
-			HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED:
-				error_message += "Response body size limit exceeded"
-			HTTPRequest.RESULT_REQUEST_FAILED:
-				error_message += "Request failed"
-				should_retry = true
-			HTTPRequest.RESULT_DOWNLOAD_FILE_CANT_OPEN:
-				error_message += "Cannot open download file"
-			HTTPRequest.RESULT_DOWNLOAD_FILE_WRITE_ERROR:
-				error_message += "Download file write error"
-			HTTPRequest.RESULT_REDIRECT_LIMIT_REACHED:
-				error_message += "Redirect limit reached"
-			HTTPRequest.RESULT_TIMEOUT:
-				error_message += "Request timeout"
-				should_retry = true
-			_:
-				error_message += "Unknown error (code: " + str(result) + ")"
-				should_retry = true
-		
-		if should_retry:
-			_handle_request_failure(error_message)
-		else:
-			error.emit(error_message)
-			_current_request.clear()
-			_retry_count = 0
-		return
-	
-	var body_string = body.get_string_from_utf8()
-	
-	var json = JSON.new()
-	var parse_result = json.parse(body_string)
-	
-	if parse_result != OK:
-		error.emit("Failed to parse response: Invalid JSON")
-		return
-	
-	var response_data = json.data
-	
-	if response_code >= 400:
-		_handle_error_response(response_code, response_data)
-		return
-	_connection_state = ConnectionState.CONNECTED
-	_is_online = true
-	
-	if _retry_timer and _retry_timer.time_left > 0:
-		_retry_timer.stop()
-	
-	var request_id = _current_request.get("id", -1)
-	if request_id != -1:
-		_active_requests.erase(request_id)
-	
-	var endpoint = _current_request.get("endpoint", "")
-	_current_request.clear()
-	_retry_count = 0
-	_handle_success_response(response_code, response_data, endpoint)
-	
-	_process_next_queued_request()
-
-func _handle_error_response(response_code: int, response_data: Variant) -> void:
+func _handle_error_response(request: Dictionary, response_code: int, response_data: Variant) -> bool:
 	var error_message = "Unknown error"
 	
 	if typeof(response_data) == TYPE_DICTIONARY:
@@ -853,8 +1257,8 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 			if typeof(response_data) == TYPE_DICTIONARY and response_data.has("error"):
 				var error_obj = response_data["error"]
 				if typeof(error_obj) == TYPE_DICTIONARY and error_obj.get("code") == "CONFLICT":
-					_handle_version_conflict()
-					return
+					_handle_version_conflict(request)
+					return false
 			
 			if typeof(response_data) == TYPE_DICTIONARY:
 				var key = response_data.get("key", "")
@@ -874,6 +1278,12 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
 			if msg_lower.contains("email") or msg_lower.contains("password") or msg_lower.contains("authentication"):
 				auth_failed.emit(error_message)
+			elif msg_lower.contains("v2 signature required") or msg_lower.contains("signature v2"):
+				if not is_using_v2_signatures():
+					print("[BaaS] Backend requires V2 signatures - please configure with configure_v2_signatures()")
+					error.emit("V2 signatures required. Please configure with project_signing_secret from BaaS dashboard.")
+				else:
+					error.emit("Invalid V2 signature configuration: " + str(error_message))
 			else:
 				error.emit("Bad request: " + str(error_message))
 		
@@ -894,81 +1304,70 @@ func _handle_error_response(response_code: int, response_data: Variant) -> void:
 		500, 502, 503, 504:
 			error.emit("Server error: " + str(error_message))
 		
-		_:
+        _:
 			var msg_lower = error_message.to_lower() if typeof(error_message) == TYPE_STRING else ""
 			if msg_lower.contains("achievement"):
 				achievement_unlock_failed.emit(error_message)
 			else:
 				error.emit("HTTP " + str(response_code) + ": " + str(error_message))
+	return true
 
-func _handle_version_conflict() -> void:
-	if not _current_request.has("endpoint") or not _current_request.has("body"):
-		error.emit("Version conflict: Cannot resolve - missing request data")
-		_current_request.clear()
-		_retry_count = 0
-		_process_next_queued_request()
+func _handle_version_conflict(request: Dictionary) -> void:
+	var endpoint = request.get("endpoint", "")
+	var body = request.get("body", {})
+	var request_id = request.get("id", -1)
+	if endpoint == "":
+		error.emit("Version conflict: Cannot resolve - missing endpoint")
+		_finalize_request(request_id)
+		_try_process_queue()
 		return
-	
-	var endpoint = _current_request["endpoint"]
-	var body = _current_request["body"]
-	
 	var key_match = endpoint.split("/")
-	if key_match.size() == 0:
+	if key_match.is_empty():
 		error.emit("Version conflict: Cannot extract key from endpoint")
-		_current_request.clear()
-		_retry_count = 0
-		_process_next_queued_request()
+		_finalize_request(request_id)
+		_try_process_queue()
 		return
-	
 	var key = key_match[key_match.size() - 1]
 	var local_data = body.get("value", {})
-	
-	_current_request.clear()
-	_retry_count = 0
-	
 	var temp_http = HTTPRequest.new()
 	add_child(temp_http)
-	
 	var url = base_url + ENDPOINT_PLAYER_DATA + "/" + key
 	var headers: PackedStringArray = [
 		"Content-Type: application/json",
 		"X-API-Key: " + api_key,
 		"X-Player-Token: " + player_token
 	]
-	
 	temp_http.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray):
 		temp_http.queue_free()
-		
 		if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 			data_conflict.emit(key, 0, local_data)
-			_process_next_queued_request()
+			_finalize_request(request_id)
+			_try_process_queue()
 			return
-		
 		var body_string = response_body.get_string_from_utf8()
 		var json = JSON.new()
 		if json.parse(body_string) != OK:
 			data_conflict.emit(key, 0, local_data)
-			_process_next_queued_request()
+			_finalize_request(request_id)
+			_try_process_queue()
 			return
-		
 		var response_data = json.data
 		if typeof(response_data) == TYPE_DICTIONARY and response_data.has("data"):
 			var data = response_data["data"]
 			if typeof(data) == TYPE_DICTIONARY:
 				var server_version = data.get("version", 0)
 				var server_data = data.get("value", {})
-				
 				data_conflict.emit(key, server_version, server_data)
-				_process_next_queued_request()
+				_finalize_request(request_id)
+				_try_process_queue()
 				return
-		
 		data_conflict.emit(key, 0, local_data)
-		_process_next_queued_request()
+		_finalize_request(request_id)
+		_try_process_queue()
 	)
-	
 	temp_http.request(url, headers)
 
-func _handle_success_response(_response_code: int, response_data: Variant, endpoint: String = "") -> void:
+func _handle_success_response(_response_code: int, response_data: Variant, request: Dictionary) -> void:
 	if typeof(response_data) != TYPE_DICTIONARY:
 		error.emit("Invalid response format: Expected dictionary")
 		return
@@ -1026,7 +1425,6 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 		score_submitted.emit(leaderboard_slug, rank)
 		return
 	
-	# Check if leaderboard data is wrapped in a "data" field
 	if response_data.has("entries") and (response_data.has("leaderboardSlug") or response_data.has("leaderboard")):
 		var entries = response_data["entries"]
 		var leaderboard_slug = response_data.get("leaderboardSlug", "")
@@ -1099,6 +1497,7 @@ func _handle_success_response(_response_code: int, response_data: Variant, endpo
 		achievements_loaded.emit([response_data])
 		return
 	
+	var endpoint = request.get("endpoint", "")
 	if response_data.has("success") and response_data.has("data"):
 		var data = response_data["data"]
 		if endpoint.contains("/friends/search"):
