@@ -2,197 +2,41 @@
 
 Backend services for your Godot game without the headache.
 
-## Test Game Available!
+## Getting started
 
-Want to see all features in action? Check out the **comprehensive test game** in `examples/testproject/`:
+1. Create an account at https://godotbaas.com and create a project.
+2. From the dashboard, copy your project's API key.
+3. In your Godot project, copy the `addons/godot_baas` folder into your `addons` directory.
+4. Enable the plugin in **Project Settings → Plugins**.
 
--  Full authentication flow (device ID, email/password, account linking)
--  Cloud saves with auto-sync
--  Global and friend leaderboards
--  Complete friends system (search, add, accept, remove)
--  Achievements with progress tracking
--  Simple clicker game to test everything
--  Clean, well-documented code you can learn from
-
-**[→ Open Test Game README](examples/testproject/README.md)** | **[→ Quick Start Guide](examples/testproject/QUICK_START.md)**
-
-## Setup
-
-Copy the `addons/godot_baas` folder into your project's `addons` directory. Enable the plugin in Project Settings → Plugins.
-
-Get your API key from the dashboard and you're good to go.
-
-## Quick Start
+Once the plugin is enabled and you have an API key, you can make your first call:
 
 ```gdscript
 extends Node
 
 func _ready():
+    # Paste your API key from https://godotbaas.com
     GodotBaaS.api_key = "gb_live_your_key_here"
-    GodotBaaS.authenticated.connect(_on_login)
+
+    GodotBaaS.authenticated.connect(_on_authenticated)
     GodotBaaS.login_with_device_id()
 
-func _on_login(player):
-    print("Logged in as: ", player.id)
+func _on_authenticated(player):
+    print("Logged in as:", player.id)
 ```
 
-That's it. Your players can now save progress, compete on leaderboards, and you get analytics.
+This gives your game a persistent backend player account with almost no setup.
 
-## Authentication
+## Optional: V2 signature support
 
-### Device ID (Recommended)
-
-Players start playing immediately. No signup forms, no friction.
+If you want stronger request signing, you can enable the V2 signature flow once you have a project signing secret in the dashboard:
 
 ```gdscript
-GodotBaaS.login_with_device_id()
+GodotBaaS.configure_v2_signatures("your_project_signing_secret")
+print("Using:", GodotBaaS.get_signature_version())  # "v2"
 ```
 
-The plugin generates a unique ID and saves it locally. Same account every time they open your game.
-
-### Upgrade to Email/Password
-
-Let players link an email so they can play on multiple devices:
-
-```gdscript
-GodotBaaS.link_account("player@email.com", "password", "username")
-```
-
-Their progress carries over. Device ID still works on the original device.
-
-### Email/Password Login
-
-If they already have an account:
-
-```gdscript
-GodotBaaS.login_player("player@email.com", "password")
-```
-
-## Cloud Saves
-
-Save anything. Load it anywhere.
-
-```gdscript
-# Save
-var save_data = {
-    "level": 10,
-    "gold": 5000,
-    "inventory": ["sword", "shield"]
-}
-GodotBaaS.save_data("player_progress", save_data)
-
-# Load
-GodotBaaS.load_data("player_progress")
-GodotBaaS.data_loaded.connect(func(key, data):
-    print("Loaded: ", data)
-)
-```
-
-### Versioning
-
-Prevent data loss when players play offline on multiple devices:
-
-```gdscript
-var current_version = 0
-
-GodotBaaS.data_saved.connect(func(key, version):
-    current_version = version
-)
-
-# Save with version check
-GodotBaaS.save_data("progress", data, current_version)
-```
-
-If versions don't match, you get a conflict signal. Handle it however makes sense for your game.
-
-### Merging Data
-
-Instead of replacing entire save files, merge specific values. Great for adding gold, updating inventory, or incrementing stats:
-
-```gdscript
-# Add gold
-GodotBaaS.merge_data("player_stats", {"gold": 100}, current_version, "increment")
-
-# Remove gold
-GodotBaaS.merge_data("player_stats", {"gold": 50}, current_version, "decrement")
-
-# Add items to inventory
-GodotBaaS.merge_data("inventory", {"items": ["sword", "potion"]}, current_version, "append")
-
-# Remove items
-GodotBaaS.merge_data("inventory", {"items": ["potion"]}, current_version, "remove")
-
-# Merge objects (updates only specified fields)
-GodotBaaS.merge_data("settings", {"volume": 0.8}, current_version, "merge")
-```
-
-Strategies:
-- `merge` - Update specific fields, keep the rest
-- `append` - Add to arrays
-- `remove` - Remove from arrays
-- `increment` - Add to numbers
-- `decrement` - Subtract from numbers
-
-Convenience method for inventory:
-
-```gdscript
-GodotBaaS.add_to_inventory("inventory", ["sword", "shield"], current_version)
-```
-
-## Leaderboards
-
-```gdscript
-# Submit score
-GodotBaaS.submit_score("weekly_high_scores", 9999)
-
-# Get top players
-GodotBaaS.get_leaderboard("weekly_high_scores", 10)
-GodotBaaS.leaderboard_loaded.connect(func(board, entries):
-    for entry in entries:
-        print("#", entry.rank, " - ", entry.score)
-)
-```
-
-Leaderboards reset automatically based on your settings (daily, weekly, monthly, or never).
-
-## Analytics
-
-Track whatever you want:
-
-```gdscript
-GodotBaaS.track_event("level_completed", {
-    "level": 5,
-    "time": 120.5,
-    "deaths": 3
-})
-```
-
-Fire and forget. Check the dashboard to see what players are doing.
-
-## Friends System
-
-Let players connect with each other, build social relationships, and compete with friends.
-
-### Sending Friend Requests
-
-Players can send friend requests to other players by username or player ID:
-
-```gdscript
-# Search for players first
-GodotBaaS.search_players("player123")
-GodotBaaS.players_found.connect(func(players):
-    for player in players:
-        print(player.username, " - ", player.relationshipStatus)
-)
-
-# Send friend request
-GodotBaaS.send_friend_request("player_id_here")
-GodotBaaS.friend_request_sent.connect(func(friendship):
-    print("Friend request sent!")
-)
-```
-
-### Managing Friend Requests
+You can start with the basic API key setup and add V2 signing later without changing the rest of your game code.
 
 Handle incoming friend requests:
 
@@ -1048,6 +892,51 @@ retry_delay_ms: int = 1000
 enable_offline_queue: bool = true
 max_queue_size: int = 50
 queue_timeout_seconds: int = 300
+
+# Security (V2 Signatures)
+enable_request_signing: bool = true
+use_v2_signatures: bool = false
+project_signing_secret: String = ""
+```
+
+### Security Configuration
+
+#### V2 Signatures (Enhanced Security)
+
+```gdscript
+# Enable V2 signatures for enhanced security
+GodotBaaS.configure_v2_signatures("your_project_signing_secret")
+
+# Check current signature version
+print("Using: " + GodotBaaS.get_signature_version())  # "v2"
+
+# Validate configuration
+var validation = GodotBaaS.validate_v2_configuration()
+if not validation.valid:
+    for issue in validation.issues:
+        print("Issue: " + issue)
+
+# Disable V2 (fall back to V1)
+GodotBaaS.disable_v2_signatures()
+```
+
+#### Security Methods
+
+```gdscript
+# Configure V2 signatures
+configure_v2_signatures(signing_secret: String)
+
+# Disable V2 signatures
+disable_v2_signatures()
+
+# Check if using V2
+is_using_v2_signatures() -> bool
+
+# Get signature version
+get_signature_version() -> String  # "v1", "v2", or "none"
+
+# Validate configuration
+validate_v2_configuration() -> Dictionary
 ```
 
 ### Enums
@@ -1069,4 +958,3 @@ enum RequestPriority {
     CRITICAL  # Never queue, fail if offline
 }
 ```
-webhooktest
